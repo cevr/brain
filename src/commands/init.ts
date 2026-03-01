@@ -108,7 +108,9 @@ export const init = Command.make("init", {
             yield* Console.error(`  ${s}`);
           }
         }
-        if (skillResult.conflicts.length > 0) {
+        const somethingChanged =
+          created.length > 0 || !cfgExists || hooksChanged || skillResult.installed.length > 0;
+        if (skillResult.conflicts.length > 0 && somethingChanged) {
           yield* Console.error(`Skipped (already exist):`);
           for (const s of skillResult.conflicts) {
             yield* Console.error(`  ${s} — use brain init --force-skills to override`);
@@ -230,51 +232,45 @@ const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function* (
     e instanceof PlatformError && (e.reason._tag === "NotFound" || e.reason._tag === "BadArgument");
 
   // Check if starter dir exists in the build
-  const starterExists = yield* fs
-    .exists(starterDir)
-    .pipe(
-      Effect.catch((e) =>
-        isNotFound(e)
-          ? Effect.succeed(false)
-          : Effect.fail(
-              new ConfigError({
-                message: `Cannot check starter dir: ${(e as PlatformError).message}`,
-              }),
-            ),
-      ),
-    );
+  const starterExists = yield* fs.exists(starterDir).pipe(
+    Effect.catch((e) =>
+      isNotFound(e)
+        ? Effect.succeed(false)
+        : Effect.fail(
+            new ConfigError({
+              message: `Cannot check starter dir: ${(e as PlatformError).message}`,
+            }),
+          ),
+    ),
+  );
   if (!starterExists) return;
 
   // Check if vault principles dir is empty
-  const entries = yield* fs
-    .readDirectory(principlesDir)
-    .pipe(
-      Effect.catch((e) =>
-        isNotFound(e)
-          ? Effect.succeed([] as string[])
-          : Effect.fail(
-              new ConfigError({
-                message: `Cannot read principles dir: ${(e as PlatformError).message}`,
-              }),
-            ),
-      ),
-    );
+  const entries = yield* fs.readDirectory(principlesDir).pipe(
+    Effect.catch((e) =>
+      isNotFound(e)
+        ? Effect.succeed([] as string[])
+        : Effect.fail(
+            new ConfigError({
+              message: `Cannot read principles dir: ${(e as PlatformError).message}`,
+            }),
+          ),
+    ),
+  );
   if (entries.length > 0) return;
 
   // Copy starter principles
-  const starterFiles = yield* fs
-    .readDirectory(starterDir)
-    .pipe(
-      Effect.catch((e) =>
-        isNotFound(e)
-          ? Effect.succeed([] as string[])
-          : Effect.fail(
-              new ConfigError({
-                message: `Cannot read starter dir: ${(e as PlatformError).message}`,
-              }),
-            ),
-      ),
-    );
+  const starterFiles = yield* fs.readDirectory(starterDir).pipe(
+    Effect.catch((e) =>
+      isNotFound(e)
+        ? Effect.succeed([] as string[])
+        : Effect.fail(
+            new ConfigError({
+              message: `Cannot read starter dir: ${(e as PlatformError).message}`,
+            }),
+          ),
+    ),
+  );
 
   for (const file of starterFiles) {
     const content = yield* fs
