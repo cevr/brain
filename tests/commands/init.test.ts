@@ -152,6 +152,48 @@ describe("wireHooks", () => {
       ).pipe(Effect.provide(TestLayer)),
     );
   }
+
+  it.live("warns and returns false when hooks is not an object", () =>
+    withTempDir((dir) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem;
+        const path = yield* Path;
+        const settingsPath = `${dir}/settings.json`;
+
+        // hooks is a string instead of an object
+        yield* fs.writeFileString(settingsPath, JSON.stringify({ hooks: "not-an-object" }));
+
+        const changed = yield* wireHooks(fs, path, settingsPath);
+        expect(changed).toBe(false);
+      }),
+    ).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.live("treats non-array hook value as empty array", () =>
+    withTempDir((dir) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem;
+        const path = yield* Path;
+        const settingsPath = `${dir}/settings.json`;
+
+        // SessionStart is a string, not an array — should be treated as empty
+        yield* fs.writeFileString(
+          settingsPath,
+          JSON.stringify({ hooks: { SessionStart: "not-array" } }),
+        );
+
+        const changed = yield* wireHooks(fs, path, settingsPath);
+        expect(changed).toBe(true);
+
+        const settings = yield* readSettings(fs, settingsPath);
+        const hooks = settings["hooks"] as Record<string, unknown[]>;
+        // brain inject was added even though SessionStart was malformed
+        expect(hooks["SessionStart"]).toHaveLength(1);
+        const session = hooks["SessionStart"]![0] as { hooks: Array<{ command: string }> };
+        expect(session.hooks[0]!.command).toBe("brain inject");
+      }),
+    ).pipe(Effect.provide(TestLayer)),
+  );
 });
 
 describe("starter principles", () => {

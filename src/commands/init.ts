@@ -72,17 +72,15 @@ export const init = Command.make("init", {
       yield* copyStarterPrinciples(fs, path, vaultPath);
 
       const cfgPath = yield* config.configFilePath();
-      const cfgExists = yield* fs
-        .exists(cfgPath)
-        .pipe(
-          Effect.mapError(
-            (e: PlatformError) =>
-              new ConfigError({
-                message: `Cannot check config: ${e.message}`,
-                code: "READ_FAILED",
-              }),
-          ),
-        );
+      const cfgExists = yield* fs.exists(cfgPath).pipe(
+        Effect.mapError(
+          (e: PlatformError) =>
+            new ConfigError({
+              message: `Cannot check config: ${e.message}`,
+              code: "READ_FAILED",
+            }),
+        ),
+      );
       if (!cfgExists) {
         yield* config.saveConfigFile({});
       }
@@ -181,10 +179,22 @@ export const wireHooks = Effect.fn("wireHooks")(function* (
 
   // Validate hooks is a plain object before using it
   const rawHooks = parsed["hooks"];
-  const hooks: Record<string, unknown[]> =
+  if (
+    rawHooks !== undefined &&
+    (typeof rawHooks !== "object" || rawHooks === null || Array.isArray(rawHooks))
+  ) {
+    yield* Console.error("Warning: settings.json hooks is not an object — skipping hook wiring");
+    return false;
+  }
+  const hooks: Record<string, unknown> =
     typeof rawHooks === "object" && rawHooks !== null && !Array.isArray(rawHooks)
-      ? (rawHooks as Record<string, unknown[]>)
+      ? (rawHooks as Record<string, unknown>)
       : {};
+
+  const getHookArray = (key: string): unknown[] => {
+    const val = hooks[key];
+    return Array.isArray(val) ? val : [];
+  };
 
   let changed = false;
 
@@ -198,7 +208,7 @@ export const wireHooks = Effect.fn("wireHooks")(function* (
     hooks: [{ type: "command", command: "brain reindex" }],
   };
 
-  const sessionStart = (hooks["SessionStart"] ?? []) as Array<{
+  const sessionStart = getHookArray("SessionStart") as Array<{
     matcher?: string;
     hooks?: Array<{ command?: string }>;
   }>;
@@ -215,7 +225,7 @@ export const wireHooks = Effect.fn("wireHooks")(function* (
     changed = true;
   }
 
-  const postToolUse = (hooks["PostToolUse"] ?? []) as Array<{
+  const postToolUse = getHookArray("PostToolUse") as Array<{
     hooks?: Array<{ command?: string }>;
   }>;
   const hasBrainReindex = postToolUse.some(
