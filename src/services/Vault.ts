@@ -260,7 +260,9 @@ export class VaultService extends ServiceMap.Service<
             (m) => firstCapture(m).split("#")[0] ?? "",
           ),
         );
-        const orphans = files.filter((f) => !indexed.has(f));
+        // Exclude seed files from orphan detection — they have their own curated indexes
+        const filesForOrphans = files.filter((f) => f.includes("/") || !VAULT_SEED_FILES.has(f));
+        const orphans = filesForOrphans.filter((f) => !indexed.has(f));
 
         const sections: Record<string, number> = {};
         for (const f of files) {
