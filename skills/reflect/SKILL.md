@@ -40,7 +40,7 @@ Mine the current conversation for brain-worthy knowledge.
    | `$(brain vault)/codebase/` | Project-specific knowledge, tool quirks |
    | `$(brain vault)/` root | Cross-cutting knowledge |
 
-   **Skill improvements**: update `~/.agent/skills/<skill>/` (or `~/.claude/skills/<skill>/`) directly if the learning is about a skill's own process.
+   **Skill improvements**: update `~/.claude/skills/<skill>/` directly if the learning is about a skill's own process.
 
    **Backlog items**: bugs, non-trivial rewrites, tooling gaps — capture as todos, not brain notes.
 

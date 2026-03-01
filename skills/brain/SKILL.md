@@ -31,7 +31,6 @@ What do you need?
 | `brain reindex [--all]`               | Rebuild `index.md` from disk (no-op if unchanged)        |
 | `brain status [--json]`               | File count, sections, orphans                            |
 | `brain init [--project] [--global]`   | Scaffold vault, write config, wire hooks, install skills |
-| `brain open [--project]`              | Open vault in `$EDITOR`                                  |
 | `brain snapshot <dir> [-o file]`      | Concatenate `.md` files with `=== path ===` delimiters   |
 | `brain extract <dir> <output> [-b N]` | Parse JSONL conversations into batched text files        |
 

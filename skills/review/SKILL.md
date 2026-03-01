@@ -38,7 +38,7 @@ Infer what to review from context — the user's message, recent diffs, or refer
 
 ### 4. Gather domain skills
 
-Check `~/.agent/skills/` and `~/.claude/skills/` for matching skills. Invoke and incorporate patterns. Use `find-skills` for uncovered domains.
+Check `~/.claude/skills/` for matching skills. Invoke and incorporate patterns. Use `find-skills` for uncovered domains.
 
 ### 5. Assessment pipeline
 

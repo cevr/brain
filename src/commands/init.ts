@@ -275,35 +275,9 @@ const installSkills = Effect.fn("installSkills")(function* (
     return { installed: [], conflicts: [], target: "" };
   }
 
-  // BRAIN_SKILLS_DIR overrides auto-detect
+  // BRAIN_SKILLS_DIR overrides default
   const envSkillsDir = process.env["BRAIN_SKILLS_DIR"];
-  let targetDir: string;
-
-  if (envSkillsDir !== undefined) {
-    targetDir = envSkillsDir;
-  } else {
-    // Auto-detect: ~/.agent/skills/ preferred, ~/.claude/skills/ fallback
-    const agentDir = path.join(home, ".agent", "skills");
-    const claudeDir = path.join(home, ".claude", "skills");
-
-    const agentExists = yield* fs
-      .exists(path.join(home, ".agent"))
-      .pipe(
-        Effect.mapError(
-          (e: PlatformError) => new ConfigError({ message: `Cannot check ~/.agent: ${e.message}` }),
-        ),
-      );
-    const claudeExists = yield* fs
-      .exists(path.join(home, ".claude"))
-      .pipe(
-        Effect.mapError(
-          (e: PlatformError) =>
-            new ConfigError({ message: `Cannot check ~/.claude: ${e.message}` }),
-        ),
-      );
-
-    targetDir = agentExists ? agentDir : claudeExists ? claudeDir : agentDir;
-  }
+  const targetDir = envSkillsDir ?? path.join(home, ".claude", "skills");
 
   yield* fs
     .makeDirectory(targetDir, { recursive: true })

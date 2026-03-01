@@ -18,7 +18,7 @@ Quality audit of the brain vault. Prune noise, merge overlaps, distill unstated 
 ```bash
 VAULT=$(brain vault)
 brain snapshot "$VAULT" --output /tmp/brain-snapshot.md
-SKILLS_DIR=$([ -d ~/.agent/skills ] && echo ~/.agent/skills || echo ~/.claude/skills)
+SKILLS_DIR=~/.claude/skills
 brain snapshot "$SKILLS_DIR" --output /tmp/skills-snapshot.md
 ```
 

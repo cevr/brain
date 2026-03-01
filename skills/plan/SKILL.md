@@ -48,7 +48,7 @@ Use parallel `Explore` subagents for independent areas.
 
 ### 4. Gather domain skills
 
-Check `~/.agent/skills/` and `~/.claude/skills/` for matching skills. Invoke matched skills, read output, and incorporate patterns. If a domain isn't covered, use `find-skills` to search for and install relevant skills. Delete one-off skills after the plan is complete.
+Check `~/.claude/skills/` for matching skills. Invoke matched skills, read output, and incorporate patterns. If a domain isn't covered, use `find-skills` to search for and install relevant skills. Delete one-off skills after the plan is complete.
 
 ### 5. Write the plan
 
