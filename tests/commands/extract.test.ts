@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { BunServices } from "@effect/platform-bun";
+import { utimesSync } from "node:fs";
 
 // extract command uses FileSystem/Path directly — we import the handler's
 // internal logic by running the command's effect with FS/Path layers.
@@ -295,6 +296,126 @@ describe("extract", () => {
 
           expect(result.conversations).toHaveLength(1);
           expect(result.conversations[0]!.uuid).toBe("big");
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+  });
+
+  describe("date filtering", () => {
+    it.live("--from filters out conversations before the date", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          const path = yield* Path;
+          const inputDir = `${dir}/input`;
+          const outputDir = `${dir}/output`;
+          yield* fs.makeDirectory(inputDir, { recursive: true });
+
+          const oldFile = path.join(inputDir, "old.jsonl");
+          const newFile = path.join(inputDir, "new.jsonl");
+
+          yield* writeJsonl(fs, oldFile, [
+            userMsg("Old conversation that should be filtered out by date range"),
+            assistantMsg("Old assistant response long enough to pass the content filter"),
+            { type: "padding", message: { content: "x".repeat(500) } },
+          ]);
+
+          yield* writeJsonl(fs, newFile, [
+            userMsg("New conversation that should pass the date range filter check"),
+            assistantMsg("New assistant response long enough to pass the content filter"),
+            { type: "padding", message: { content: "x".repeat(500) } },
+          ]);
+
+          // Set mtimes: old → 2024-01-01, new → 2024-06-01
+          const oldDate = new Date("2024-01-01");
+          const newDate = new Date("2024-06-01");
+          yield* Effect.sync(() => {
+            utimesSync(oldFile, oldDate, oldDate);
+            utimesSync(newFile, newDate, newDate);
+          });
+
+          const result = yield* runExtract(inputDir, outputDir, { from: "2024-03-01" });
+
+          expect(result.conversations).toHaveLength(1);
+          expect(result.conversations[0]!.uuid).toBe("new");
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("--to filters out conversations after the date", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          const path = yield* Path;
+          const inputDir = `${dir}/input`;
+          const outputDir = `${dir}/output`;
+          yield* fs.makeDirectory(inputDir, { recursive: true });
+
+          const oldFile = path.join(inputDir, "old.jsonl");
+          const newFile = path.join(inputDir, "new.jsonl");
+
+          yield* writeJsonl(fs, oldFile, [
+            userMsg("Old conversation that should pass the date range filter check"),
+            assistantMsg("Old assistant response long enough to pass the content filter"),
+            { type: "padding", message: { content: "x".repeat(500) } },
+          ]);
+
+          yield* writeJsonl(fs, newFile, [
+            userMsg("New conversation that should be filtered out by date range"),
+            assistantMsg("New assistant response long enough to pass the content filter"),
+            { type: "padding", message: { content: "x".repeat(500) } },
+          ]);
+
+          const oldDate = new Date("2024-01-01");
+          const newDate = new Date("2024-06-01");
+          yield* Effect.sync(() => {
+            utimesSync(oldFile, oldDate, oldDate);
+            utimesSync(newFile, newDate, newDate);
+          });
+
+          const result = yield* runExtract(inputDir, outputDir, { to: "2024-03-01" });
+
+          expect(result.conversations).toHaveLength(1);
+          expect(result.conversations[0]!.uuid).toBe("old");
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("--from and --to together select a date range", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          const path = yield* Path;
+          const inputDir = `${dir}/input`;
+          const outputDir = `${dir}/output`;
+          yield* fs.makeDirectory(inputDir, { recursive: true });
+
+          const earlyFile = path.join(inputDir, "early.jsonl");
+          const midFile = path.join(inputDir, "mid.jsonl");
+          const lateFile = path.join(inputDir, "late.jsonl");
+
+          for (const file of [earlyFile, midFile, lateFile]) {
+            const label = path.basename(file).replace(".jsonl", "");
+            yield* writeJsonl(fs, file, [
+              userMsg(`${label} conversation message long enough to pass filter check`),
+              assistantMsg(`${label} assistant response long enough to pass content filter`),
+              { type: "padding", message: { content: "x".repeat(500) } },
+            ]);
+          }
+
+          yield* Effect.sync(() => {
+            utimesSync(earlyFile, new Date("2024-01-01"), new Date("2024-01-01"));
+            utimesSync(midFile, new Date("2024-06-01"), new Date("2024-06-01"));
+            utimesSync(lateFile, new Date("2024-12-01"), new Date("2024-12-01"));
+          });
+
+          const result = yield* runExtract(inputDir, outputDir, {
+            from: "2024-03-01",
+            to: "2024-09-01",
+          });
+
+          expect(result.conversations).toHaveLength(1);
+          expect(result.conversations[0]!.uuid).toBe("mid");
         }),
       ).pipe(Effect.provide(TestLayer)),
     );
