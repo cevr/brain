@@ -16,7 +16,7 @@ const globalFlag = Flag.boolean("global").pipe(
   Flag.withDescription("Namespace project vault under global vault"),
 );
 const jsonFlag = Flag.boolean("json").pipe(Flag.withDescription("Output as JSON"));
-const skipSkillsFlag = Flag.boolean("skip-skills").pipe(
+const noSkillsFlag = Flag.boolean("no-skills").pipe(
   Flag.withDescription("Skip skill installation"),
 );
 const forceSkillsFlag = Flag.boolean("force-skills").pipe(
@@ -27,11 +27,11 @@ export const init = Command.make("init", {
   project: projectFlag,
   global: globalFlag,
   json: jsonFlag,
-  skipSkills: skipSkillsFlag,
+  noSkills: noSkillsFlag,
   forceSkills: forceSkillsFlag,
 }).pipe(
   Command.withDescription("Initialize a brain vault"),
-  Command.withHandler(({ project, global, json, skipSkills, forceSkills }) =>
+  Command.withHandler(({ project, global, json, noSkills, forceSkills }) =>
     Effect.gen(function* () {
       const config = yield* ConfigService;
       const vault = yield* VaultService;
@@ -88,7 +88,7 @@ export const init = Command.make("init", {
       const settingsPath = yield* config.claudeSettingsPath();
       const hooksChanged = yield* wireHooks(fs, path, settingsPath);
 
-      const skillResult = skipSkills
+      const skillResult = noSkills
         ? { installed: [] as string[], conflicts: [] as string[], target: "" }
         : yield* installSkills(fs, path, forceSkills, settingsPath);
 
