@@ -21,7 +21,7 @@ export const inject = Command.make("inject").pipe(
             if (e.message.includes("Cannot read index")) {
               return Console.error("Vault not initialized — run `brain init`").pipe(Effect.as(""));
             }
-            return Effect.succeed("");
+            return Effect.fail(e);
           }),
         );
 
