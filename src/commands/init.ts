@@ -46,6 +46,17 @@ export const init = Command.make("init", {
           const cwd = process.cwd();
           const projectName = path.basename(cwd);
           vaultPath = path.join(globalPath, "projects", projectName);
+          const targetExists = yield* fs
+            .exists(vaultPath)
+            .pipe(
+              Effect.mapError(
+                (e: PlatformError) =>
+                  new ConfigError({ message: `Cannot check project vault: ${e.message}` }),
+              ),
+            );
+          if (targetExists) {
+            yield* Console.error(`Warning: project vault already exists at ${vaultPath}`);
+          }
         } else {
           const cwd = process.cwd();
           vaultPath = path.join(cwd, "brain");
