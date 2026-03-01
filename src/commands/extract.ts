@@ -6,7 +6,10 @@ import type { PlatformError } from "effect/PlatformError";
 import { BrainError } from "../errors/index.js";
 
 const dirArg = Argument.string("dir");
-const outputArg = Argument.string("output");
+const outputFlag = Flag.string("output").pipe(
+  Flag.withAlias("o"),
+  Flag.withDescription("Output directory"),
+);
 const batchesFlag = Flag.integer("batches").pipe(
   Flag.withDefault(3),
   Flag.withAlias("b"),
@@ -35,7 +38,7 @@ interface Conversation {
 
 export const extract = Command.make("extract", {
   dir: dirArg,
-  output: outputArg,
+  output: outputFlag,
   batches: batchesFlag,
   from: fromFlag,
   to: toFlag,
@@ -49,6 +52,13 @@ export const extract = Command.make("extract", {
 
       const fromMs = Option.map(fromDate, (d) => new Date(d).getTime());
       const toMs = Option.map(toDate, (d) => new Date(d).getTime() + 86400000 - 1);
+
+      if (Option.isSome(fromMs) && Number.isNaN(fromMs.value)) {
+        return yield* new BrainError({ message: "Invalid --from date. Use YYYY-MM-DD format." });
+      }
+      if (Option.isSome(toMs) && Number.isNaN(toMs.value)) {
+        return yield* new BrainError({ message: "Invalid --to date. Use YYYY-MM-DD format." });
+      }
 
       const files = yield* fs
         .readDirectory(dir)

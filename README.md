@@ -17,5 +17,5 @@ brain vault         # print active vault path
 brain inject        # SessionStart hook (outputs index to stdout)
 brain reindex       # PostToolUse hook (rebuilds index.md)
 brain snapshot <dir> [-o file]   # concatenate .md files
-brain extract <dir> <output>     # mine JSONL conversations
+brain extract <dir> -o <output>  # mine JSONL conversations
 ```
