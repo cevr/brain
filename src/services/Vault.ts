@@ -149,10 +149,14 @@ export class VaultService extends ServiceMap.Service<
           .readFileString(indexPath)
           .pipe(Effect.catch(() => Effect.succeed("")));
 
-        // Strip heading anchors (e.g. [[file#heading]] → file) for comparison
-        const indexed = [...existingContent.matchAll(/\[\[([^\]]+)\]\]/g)]
-          .map((m) => firstCapture(m).split("#")[0] ?? "")
-          .sort();
+        // Strip heading anchors (e.g. [[file#heading]] → file) and deduplicate for comparison
+        const indexed = [
+          ...new Set(
+            [...existingContent.matchAll(/\[\[([^\]]+)\]\]/g)].map(
+              (m) => firstCapture(m).split("#")[0] ?? "",
+            ),
+          ),
+        ].sort();
 
         const diskStr = disk.join("\n");
         const indexedStr = indexed.join("\n");
