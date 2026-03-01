@@ -15,11 +15,12 @@ export const inject = Command.make("inject").pipe(
         config.projectVaultPath(),
       ]);
 
-      const readIndexSafe = (p: string) =>
+      const readIndexSafe = (p: string, opts: { required: boolean }) =>
         vault.readIndex(p).pipe(
           Effect.catchTag("VaultError", (e) => {
             if (e.message.includes("Cannot read index")) {
-              return Console.error("Vault not initialized — run `brain init`").pipe(Effect.as(""));
+              if (opts.required) return Effect.fail(e);
+              return Console.error(`Skipping project vault (no index): ${p}`).pipe(Effect.as(""));
             }
             return Effect.fail(e);
           }),
@@ -27,8 +28,11 @@ export const inject = Command.make("inject").pipe(
 
       // Read indexes concurrently when project vault exists
       const [globalIndex, projectIndex] = Option.isSome(projectPath)
-        ? yield* Effect.all([readIndexSafe(globalPath), readIndexSafe(projectPath.value)])
-        : [yield* readIndexSafe(globalPath), ""];
+        ? yield* Effect.all([
+            readIndexSafe(globalPath, { required: true }),
+            readIndexSafe(projectPath.value, { required: false }),
+          ])
+        : [yield* readIndexSafe(globalPath, { required: true }), ""];
 
       let output = "Brain vault — read relevant files before acting:\n\n";
       output += globalIndex;
