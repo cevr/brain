@@ -35,10 +35,13 @@ export const reindex = Command.make("reindex", {
 
       for (const vaultPath of vaults) {
         const result = yield* vault.rebuildIndex(vaultPath).pipe(
-          Effect.catchTag("errors/VaultError", (e) => {
-            if (e.message.includes("Cannot read vault")) {
+          Effect.catchTag("@cvr/brain/VaultError", (e) => {
+            if (e.code === "READ_FAILED" || e.code === "NOT_INITIALIZED") {
               return Effect.fail(
-                new VaultError({ message: "Vault not initialized — run `brain init`" }),
+                new VaultError({
+                  message: "Vault not initialized — run `brain init`",
+                  code: "NOT_INITIALIZED",
+                }),
               );
             }
             return Effect.fail(e);

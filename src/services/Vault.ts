@@ -1,7 +1,7 @@
 import { Effect, Layer, Option, ServiceMap } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
-import { PlatformError } from "effect/PlatformError";
+import type { PlatformError } from "effect/PlatformError";
 import { VaultError } from "../errors/index.js";
 
 function isNotFound(e: PlatformError): boolean {
@@ -82,7 +82,11 @@ export class VaultService extends ServiceMap.Service<
           .pipe(
             Effect.mapError(
               (e: PlatformError) =>
-                new VaultError({ message: `Cannot read vault: ${e.message}`, path: vaultPath }),
+                new VaultError({
+                  message: `Cannot read vault: ${e.message}`,
+                  code: "READ_FAILED",
+                  path: vaultPath,
+                }),
             ),
           );
         return entries
@@ -99,7 +103,11 @@ export class VaultService extends ServiceMap.Service<
           .pipe(
             Effect.mapError(
               (e: PlatformError) =>
-                new VaultError({ message: `Cannot create vault: ${e.message}`, path: vaultPath }),
+                new VaultError({
+                  message: `Cannot create vault: ${e.message}`,
+                  code: "WRITE_FAILED",
+                  path: vaultPath,
+                }),
             ),
           );
 
@@ -109,6 +117,7 @@ export class VaultService extends ServiceMap.Service<
               (e: PlatformError) =>
                 new VaultError({
                   message: `Cannot create ${dir}: ${e.message}`,
+                  code: "WRITE_FAILED",
                   path: vaultPath,
                 }),
             ),
@@ -122,6 +131,7 @@ export class VaultService extends ServiceMap.Service<
               (e: PlatformError) =>
                 new VaultError({
                   message: `Cannot check ${filePath}: ${e.message}`,
+                  code: "READ_FAILED",
                   path: vaultPath,
                 }),
             ),
@@ -132,6 +142,7 @@ export class VaultService extends ServiceMap.Service<
                 (e: PlatformError) =>
                   new VaultError({
                     message: `Cannot write ${filePath}: ${e.message}`,
+                    code: "WRITE_FAILED",
                     path: vaultPath,
                   }),
               ),
@@ -151,15 +162,14 @@ export class VaultService extends ServiceMap.Service<
         const disk = allFiles.filter((f) => f.includes("/") || !VAULT_SEED_FILES.has(f));
 
         const existingContent = yield* fs.readFileString(indexPath).pipe(
-          Effect.catch((e) =>
-            e instanceof PlatformError && isNotFound(e)
-              ? Effect.succeed("")
-              : Effect.fail(
-                  new VaultError({
-                    message: `Cannot read index: ${(e as PlatformError).message}`,
-                    path: vaultPath,
-                  }),
-                ),
+          Effect.catchIf(isNotFound, () => Effect.succeed("")),
+          Effect.mapError(
+            (e) =>
+              new VaultError({
+                message: `Cannot read index: ${(e as PlatformError).message}`,
+                code: "INDEX_MISSING",
+                path: vaultPath,
+              }),
           ),
         );
 
@@ -216,7 +226,11 @@ export class VaultService extends ServiceMap.Service<
           .pipe(
             Effect.mapError(
               (e: PlatformError) =>
-                new VaultError({ message: `Cannot write index: ${e.message}`, path: vaultPath }),
+                new VaultError({
+                  message: `Cannot write index: ${e.message}`,
+                  code: "WRITE_FAILED",
+                  path: vaultPath,
+                }),
             ),
           );
 
@@ -235,7 +249,11 @@ export class VaultService extends ServiceMap.Service<
           .pipe(
             Effect.mapError(
               (e: PlatformError) =>
-                new VaultError({ message: `Cannot read index: ${e.message}`, path: vaultPath }),
+                new VaultError({
+                  message: `Cannot read index: ${e.message}`,
+                  code: "INDEX_MISSING",
+                  path: vaultPath,
+                }),
             ),
           );
       });
@@ -244,15 +262,14 @@ export class VaultService extends ServiceMap.Service<
         const files = yield* listMdFiles(vaultPath);
 
         const indexContent = yield* fs.readFileString(path.join(vaultPath, "index.md")).pipe(
-          Effect.catch((e) =>
-            e instanceof PlatformError && isNotFound(e)
-              ? Effect.succeed("")
-              : Effect.fail(
-                  new VaultError({
-                    message: `Cannot read index: ${(e as PlatformError).message}`,
-                    path: vaultPath,
-                  }),
-                ),
+          Effect.catchIf(isNotFound, () => Effect.succeed("")),
+          Effect.mapError(
+            (e) =>
+              new VaultError({
+                message: `Cannot read index: ${(e as PlatformError).message}`,
+                code: "INDEX_MISSING",
+                path: vaultPath,
+              }),
           ),
         );
         const indexed = new Set(
@@ -282,7 +299,11 @@ export class VaultService extends ServiceMap.Service<
           .pipe(
             Effect.mapError(
               (e: PlatformError) =>
-                new VaultError({ message: `Cannot read directory: ${e.message}`, path: dirPath }),
+                new VaultError({
+                  message: `Cannot read directory: ${e.message}`,
+                  code: "READ_FAILED",
+                  path: dirPath,
+                }),
             ),
           );
 
@@ -298,7 +319,11 @@ export class VaultService extends ServiceMap.Service<
             .pipe(
               Effect.mapError(
                 (e: PlatformError) =>
-                  new VaultError({ message: `Cannot read ${file}: ${e.message}`, path: dirPath }),
+                  new VaultError({
+                    message: `Cannot read ${file}: ${e.message}`,
+                    code: "READ_FAILED",
+                    path: dirPath,
+                  }),
               ),
             );
           chunks.push(`=== ${file} ===`);
@@ -315,6 +340,7 @@ export class VaultService extends ServiceMap.Service<
               (e: PlatformError) =>
                 new VaultError({
                   message: `Cannot create output dir: ${e.message}`,
+                  code: "WRITE_FAILED",
                   path: outputPath.value,
                 }),
             ),
@@ -324,6 +350,7 @@ export class VaultService extends ServiceMap.Service<
               (e: PlatformError) =>
                 new VaultError({
                   message: `Cannot write snapshot: ${e.message}`,
+                  code: "WRITE_FAILED",
                   path: outputPath.value,
                 }),
             ),

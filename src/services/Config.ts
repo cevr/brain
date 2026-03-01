@@ -45,7 +45,10 @@ export class ConfigService extends ServiceMap.Service<
           .pipe(
             Effect.mapError(
               (e: PlatformError) =>
-                new ConfigError({ message: `Cannot check config: ${e.message}` }),
+                new ConfigError({
+                  message: `Cannot check config: ${e.message}`,
+                  code: "READ_FAILED",
+                }),
             ),
           );
         if (!exists) return {};
@@ -54,7 +57,10 @@ export class ConfigService extends ServiceMap.Service<
           .pipe(
             Effect.mapError(
               (e: PlatformError) =>
-                new ConfigError({ message: `Cannot read config: ${e.message}` }),
+                new ConfigError({
+                  message: `Cannot read config: ${e.message}`,
+                  code: "READ_FAILED",
+                }),
             ),
           );
         return yield* decodeConfigFile(text).pipe(
@@ -76,14 +82,15 @@ export class ConfigService extends ServiceMap.Service<
 
       const projectVaultPath = Effect.fn("ConfigService.projectVaultPath")(function* () {
         const checkIndex = (dir: string) =>
-          fs
-            .exists(path.join(dir, "index.md"))
-            .pipe(
-              Effect.mapError(
-                (e: PlatformError) =>
-                  new ConfigError({ message: `Cannot check project vault: ${e.message}` }),
-              ),
-            );
+          fs.exists(path.join(dir, "index.md")).pipe(
+            Effect.mapError(
+              (e: PlatformError) =>
+                new ConfigError({
+                  message: `Cannot check project vault: ${e.message}`,
+                  code: "READ_FAILED",
+                }),
+            ),
+          );
 
         const explicit = process.env["BRAIN_PROJECT_DIR"];
         if (explicit !== undefined) {
@@ -117,25 +124,29 @@ export class ConfigService extends ServiceMap.Service<
       ) {
         const cfgPath = yield* resolveConfigFilePath();
         const dir = path.dirname(cfgPath);
-        yield* fs
-          .makeDirectory(dir, { recursive: true })
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new ConfigError({ message: `Cannot create config dir: ${e.message}` }),
-            ),
-          );
-        const text = yield* encodeConfigFile(config).pipe(
-          Effect.mapError(() => new ConfigError({ message: "Cannot encode config" })),
+        yield* fs.makeDirectory(dir, { recursive: true }).pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new ConfigError({
+                message: `Cannot create config dir: ${e.message}`,
+                code: "WRITE_FAILED",
+              }),
+          ),
         );
-        yield* fs
-          .writeFileString(cfgPath, text + "\n")
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new ConfigError({ message: `Cannot write config: ${e.message}` }),
-            ),
-          );
+        const text = yield* encodeConfigFile(config).pipe(
+          Effect.mapError(
+            () => new ConfigError({ message: "Cannot encode config", code: "WRITE_FAILED" }),
+          ),
+        );
+        yield* fs.writeFileString(cfgPath, text + "\n").pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new ConfigError({
+                message: `Cannot write config: ${e.message}`,
+                code: "WRITE_FAILED",
+              }),
+          ),
+        );
       });
 
       return {

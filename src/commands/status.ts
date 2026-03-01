@@ -13,18 +13,24 @@ export const status = Command.make("status", { json: jsonFlag }).pipe(
       const config = yield* ConfigService;
       const vault = yield* VaultService;
 
-      const vaultPath = yield* config
-        .activeVaultPath()
-        .pipe(
-          Effect.catchTag("errors/ConfigError", () =>
-            Effect.fail(new VaultError({ message: "Vault not initialized — run `brain init`" })),
+      const vaultPath = yield* config.activeVaultPath().pipe(
+        Effect.catchTag("@cvr/brain/ConfigError", () =>
+          Effect.fail(
+            new VaultError({
+              message: "Vault not initialized — run `brain init`",
+              code: "NOT_INITIALIZED",
+            }),
           ),
-        );
+        ),
+      );
       const result = yield* vault.status(vaultPath).pipe(
-        Effect.catchTag("errors/VaultError", (e) => {
-          if (e.message.includes("Cannot read vault")) {
+        Effect.catchTag("@cvr/brain/VaultError", (e) => {
+          if (e.code === "READ_FAILED" || e.code === "NOT_INITIALIZED") {
             return Effect.fail(
-              new VaultError({ message: "Vault not initialized — run `brain init`" }),
+              new VaultError({
+                message: "Vault not initialized — run `brain init`",
+                code: "NOT_INITIALIZED",
+              }),
             );
           }
           return Effect.fail(e);

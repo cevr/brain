@@ -45,7 +45,10 @@ export const vault = Command.make("vault", {
         if (Option.isSome(p)) {
           yield* Console.log(p.value);
         } else {
-          return yield* new BrainError({ message: "No project vault found" });
+          return yield* new BrainError({
+            message: "No project vault found",
+            code: "NOT_INITIALIZED",
+          });
         }
       } else {
         yield* Console.log(yield* config.activeVaultPath());

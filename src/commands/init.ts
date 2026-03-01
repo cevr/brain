@@ -46,14 +46,15 @@ export const init = Command.make("init", {
           const cwd = process.cwd();
           const projectName = path.basename(cwd);
           vaultPath = path.join(globalPath, "projects", projectName);
-          const targetExists = yield* fs
-            .exists(vaultPath)
-            .pipe(
-              Effect.mapError(
-                (e: PlatformError) =>
-                  new ConfigError({ message: `Cannot check project vault: ${e.message}` }),
-              ),
-            );
+          const targetExists = yield* fs.exists(vaultPath).pipe(
+            Effect.mapError(
+              (e: PlatformError) =>
+                new ConfigError({
+                  message: `Cannot check project vault: ${e.message}`,
+                  code: "READ_FAILED",
+                }),
+            ),
+          );
           if (targetExists) {
             yield* Console.error(`Warning: project vault already exists at ${vaultPath}`);
           }
@@ -75,7 +76,11 @@ export const init = Command.make("init", {
         .exists(cfgPath)
         .pipe(
           Effect.mapError(
-            (e: PlatformError) => new ConfigError({ message: `Cannot check config: ${e.message}` }),
+            (e: PlatformError) =>
+              new ConfigError({
+                message: `Cannot check config: ${e.message}`,
+                code: "READ_FAILED",
+              }),
           ),
         );
       if (!cfgExists) {
@@ -139,34 +144,39 @@ export const wireHooks = Effect.fn("wireHooks")(function* (
   settingsPath: string,
 ) {
   const dir = path.dirname(settingsPath);
-  yield* fs
-    .makeDirectory(dir, { recursive: true })
-    .pipe(
-      Effect.mapError(
-        (e: PlatformError) =>
-          new ConfigError({ message: `Cannot create settings dir: ${e.message}` }),
-      ),
-    );
+  yield* fs.makeDirectory(dir, { recursive: true }).pipe(
+    Effect.mapError(
+      (e: PlatformError) =>
+        new ConfigError({
+          message: `Cannot create settings dir: ${e.message}`,
+          code: "WRITE_FAILED",
+        }),
+    ),
+  );
 
-  const existing = yield* fs
-    .readFileString(settingsPath)
-    .pipe(
-      Effect.catch((e) =>
-        e instanceof PlatformError &&
-        (e.reason._tag === "NotFound" || e.reason._tag === "BadArgument")
-          ? Effect.succeed("{}")
-          : Effect.fail(
-              new ConfigError({ message: `Cannot read settings: ${(e as PlatformError).message}` }),
-            ),
-      ),
-    );
+  const existing = yield* fs.readFileString(settingsPath).pipe(
+    Effect.catch((e) =>
+      e instanceof PlatformError &&
+      (e.reason._tag === "NotFound" || e.reason._tag === "BadArgument")
+        ? Effect.succeed("{}")
+        : Effect.fail(
+            new ConfigError({
+              message: `Cannot read settings: ${(e as PlatformError).message}`,
+              code: "READ_FAILED",
+            }),
+          ),
+    ),
+  );
 
   const parsed = yield* Effect.try({
     try: () => JSON.parse(existing) as Record<string, unknown>,
-    catch: () => new ConfigError({ message: "Cannot parse settings.json" }),
+    catch: () => new ConfigError({ message: "Cannot parse settings.json", code: "PARSE_FAILED" }),
   });
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return yield* new ConfigError({ message: "settings.json is not a JSON object" });
+    return yield* new ConfigError({
+      message: "settings.json is not a JSON object",
+      code: "PARSE_FAILED",
+    });
   }
 
   // Validate hooks is a plain object before using it
@@ -219,13 +229,15 @@ export const wireHooks = Effect.fn("wireHooks")(function* (
   if (changed) {
     parsed["hooks"] = hooks;
     // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
-    yield* fs
-      .writeFileString(settingsPath, JSON.stringify(parsed, null, 2) + "\n")
-      .pipe(
-        Effect.mapError(
-          (e: PlatformError) => new ConfigError({ message: `Cannot write settings: ${e.message}` }),
-        ),
-      );
+    yield* fs.writeFileString(settingsPath, JSON.stringify(parsed, null, 2) + "\n").pipe(
+      Effect.mapError(
+        (e: PlatformError) =>
+          new ConfigError({
+            message: `Cannot write settings: ${e.message}`,
+            code: "WRITE_FAILED",
+          }),
+      ),
+    );
   }
 
   return changed;
@@ -253,6 +265,7 @@ export const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function
         : Effect.fail(
             new ConfigError({
               message: `Cannot check starter dir: ${(e as PlatformError).message}`,
+              code: "READ_FAILED",
             }),
           ),
     ),
@@ -267,6 +280,7 @@ export const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function
         : Effect.fail(
             new ConfigError({
               message: `Cannot read principles dir: ${(e as PlatformError).message}`,
+              code: "READ_FAILED",
             }),
           ),
     ),
@@ -281,29 +295,32 @@ export const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function
         : Effect.fail(
             new ConfigError({
               message: `Cannot read starter dir: ${(e as PlatformError).message}`,
+              code: "READ_FAILED",
             }),
           ),
     ),
   );
 
   for (const file of starterFiles) {
-    const content = yield* fs
-      .readFile(path.join(starterDir, file))
-      .pipe(
+    const content = yield* fs.readFile(path.join(starterDir, file)).pipe(
+      Effect.mapError(
+        (e: PlatformError) =>
+          new ConfigError({
+            message: `Cannot read starter file ${file}: ${e.message}`,
+            code: "READ_FAILED",
+          }),
+      ),
+    );
+    if (content.length > 0) {
+      yield* fs.writeFile(path.join(principlesDir, file), content).pipe(
         Effect.mapError(
           (e: PlatformError) =>
-            new ConfigError({ message: `Cannot read starter file ${file}: ${e.message}` }),
+            new ConfigError({
+              message: `Cannot write ${file}: ${e.message}`,
+              code: "WRITE_FAILED",
+            }),
         ),
       );
-    if (content.length > 0) {
-      yield* fs
-        .writeFile(path.join(principlesDir, file), content)
-        .pipe(
-          Effect.mapError(
-            (e: PlatformError) =>
-              new ConfigError({ message: `Cannot write ${file}: ${e.message}` }),
-          ),
-        );
     }
   }
 
@@ -316,28 +333,31 @@ export const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function
         : Effect.fail(
             new ConfigError({
               message: `Cannot check starter principles.md: ${(e as PlatformError).message}`,
+              code: "READ_FAILED",
             }),
           ),
     ),
   );
   if (indexSrcExists) {
-    const indexContent = yield* fs
-      .readFile(indexSrc)
-      .pipe(
+    const indexContent = yield* fs.readFile(indexSrc).pipe(
+      Effect.mapError(
+        (e: PlatformError) =>
+          new ConfigError({
+            message: `Cannot read starter principles.md: ${e.message}`,
+            code: "READ_FAILED",
+          }),
+      ),
+    );
+    if (indexContent.length > 0) {
+      yield* fs.writeFile(path.join(vaultPath, "principles.md"), indexContent).pipe(
         Effect.mapError(
           (e: PlatformError) =>
-            new ConfigError({ message: `Cannot read starter principles.md: ${e.message}` }),
+            new ConfigError({
+              message: `Cannot write principles.md: ${e.message}`,
+              code: "WRITE_FAILED",
+            }),
         ),
       );
-    if (indexContent.length > 0) {
-      yield* fs
-        .writeFile(path.join(vaultPath, "principles.md"), indexContent)
-        .pipe(
-          Effect.mapError(
-            (e: PlatformError) =>
-              new ConfigError({ message: `Cannot write principles.md: ${e.message}` }),
-          ),
-        );
     }
   }
 });
@@ -352,14 +372,15 @@ const installSkills = Effect.fn("installSkills")(function* (
   // REPO_ROOT injected at compile time by scripts/build.ts
   const sourceDir = path.join(REPO_ROOT, "skills");
 
-  const sourceExists = yield* fs
-    .exists(sourceDir)
-    .pipe(
-      Effect.mapError(
-        (e: PlatformError) =>
-          new ConfigError({ message: `Cannot check skills source: ${e.message}` }),
-      ),
-    );
+  const sourceExists = yield* fs.exists(sourceDir).pipe(
+    Effect.mapError(
+      (e: PlatformError) =>
+        new ConfigError({
+          message: `Cannot check skills source: ${e.message}`,
+          code: "READ_FAILED",
+        }),
+    ),
+  );
   if (!sourceExists) {
     return { installed: [], conflicts: [], target: "" };
   }
@@ -371,24 +392,26 @@ const installSkills = Effect.fn("installSkills")(function* (
       ? envSkillsDir
       : path.join(home, ".claude", "skills");
 
-  yield* fs
-    .makeDirectory(targetDir, { recursive: true })
-    .pipe(
-      Effect.mapError(
-        (e: PlatformError) =>
-          new ConfigError({ message: `Cannot create skills dir: ${e.message}` }),
-      ),
-    );
+  yield* fs.makeDirectory(targetDir, { recursive: true }).pipe(
+    Effect.mapError(
+      (e: PlatformError) =>
+        new ConfigError({
+          message: `Cannot create skills dir: ${e.message}`,
+          code: "WRITE_FAILED",
+        }),
+    ),
+  );
 
   // List source skills
-  const sourceEntries = yield* fs
-    .readDirectory(sourceDir)
-    .pipe(
-      Effect.mapError(
-        (e: PlatformError) =>
-          new ConfigError({ message: `Cannot read skills source: ${e.message}` }),
-      ),
-    );
+  const sourceEntries = yield* fs.readDirectory(sourceDir).pipe(
+    Effect.mapError(
+      (e: PlatformError) =>
+        new ConfigError({
+          message: `Cannot read skills source: ${e.message}`,
+          code: "READ_FAILED",
+        }),
+    ),
+  );
 
   const installed: string[] = [];
   const conflicts: string[] = [];
@@ -400,7 +423,8 @@ const installSkills = Effect.fn("installSkills")(function* (
       .stat(path.join(sourceDir, entry))
       .pipe(
         Effect.mapError(
-          (e: PlatformError) => new ConfigError({ message: `Cannot stat ${entry}: ${e.message}` }),
+          (e: PlatformError) =>
+            new ConfigError({ message: `Cannot stat ${entry}: ${e.message}`, code: "READ_FAILED" }),
         ),
       );
     if (stat.type === "Directory") {
@@ -410,14 +434,15 @@ const installSkills = Effect.fn("installSkills")(function* (
 
   for (const skill of skills) {
     const targetSkillDir = path.join(targetDir, skill);
-    const exists = yield* fs
-      .exists(targetSkillDir)
-      .pipe(
-        Effect.mapError(
-          (e: PlatformError) =>
-            new ConfigError({ message: `Cannot check skill ${skill}: ${e.message}` }),
-        ),
-      );
+    const exists = yield* fs.exists(targetSkillDir).pipe(
+      Effect.mapError(
+        (e: PlatformError) =>
+          new ConfigError({
+            message: `Cannot check skill ${skill}: ${e.message}`,
+            code: "READ_FAILED",
+          }),
+      ),
+    );
 
     if (exists && !force) {
       conflicts.push(skill);
@@ -447,7 +472,8 @@ const copyDir: (
     .makeDirectory(dest, { recursive: true })
     .pipe(
       Effect.mapError(
-        (e: PlatformError) => new ConfigError({ message: `Cannot create ${dest}: ${e.message}` }),
+        (e: PlatformError) =>
+          new ConfigError({ message: `Cannot create ${dest}: ${e.message}`, code: "WRITE_FAILED" }),
       ),
     );
 
@@ -455,7 +481,8 @@ const copyDir: (
     .readDirectory(src)
     .pipe(
       Effect.mapError(
-        (e: PlatformError) => new ConfigError({ message: `Cannot read ${src}: ${e.message}` }),
+        (e: PlatformError) =>
+          new ConfigError({ message: `Cannot read ${src}: ${e.message}`, code: "READ_FAILED" }),
       ),
     );
 
@@ -463,35 +490,38 @@ const copyDir: (
     const srcPath = p.join(src, entry);
     const destPath = p.join(dest, entry);
 
-    const stat = yield* fs
-      .stat(srcPath)
-      .pipe(
-        Effect.mapError(
-          (e: PlatformError) =>
-            new ConfigError({ message: `Cannot stat ${srcPath}: ${e.message}` }),
-        ),
-      );
+    const stat = yield* fs.stat(srcPath).pipe(
+      Effect.mapError(
+        (e: PlatformError) =>
+          new ConfigError({
+            message: `Cannot stat ${srcPath}: ${e.message}`,
+            code: "READ_FAILED",
+          }),
+      ),
+    );
 
     if (stat.type === "Directory") {
       yield* copyDir(fs, p, srcPath, destPath);
     } else {
       // Binary-safe: use readFile/writeFile instead of readFileString/writeFileString
-      const content = yield* fs
-        .readFile(srcPath)
-        .pipe(
-          Effect.mapError(
-            (e: PlatformError) =>
-              new ConfigError({ message: `Cannot read ${srcPath}: ${e.message}` }),
-          ),
-        );
-      yield* fs
-        .writeFile(destPath, content)
-        .pipe(
-          Effect.mapError(
-            (e: PlatformError) =>
-              new ConfigError({ message: `Cannot write ${destPath}: ${e.message}` }),
-          ),
-        );
+      const content = yield* fs.readFile(srcPath).pipe(
+        Effect.mapError(
+          (e: PlatformError) =>
+            new ConfigError({
+              message: `Cannot read ${srcPath}: ${e.message}`,
+              code: "READ_FAILED",
+            }),
+        ),
+      );
+      yield* fs.writeFile(destPath, content).pipe(
+        Effect.mapError(
+          (e: PlatformError) =>
+            new ConfigError({
+              message: `Cannot write ${destPath}: ${e.message}`,
+              code: "WRITE_FAILED",
+            }),
+        ),
+      );
     }
   }
 });
