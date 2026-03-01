@@ -141,7 +141,7 @@ export const extract = Command.make("extract", {
             const maxLen = msgType === "user" ? 3000 : 800;
             messages.push({
               role: msgType,
-              content: t.slice(0, maxLen),
+              content: clean.slice(0, maxLen),
             });
           }
         }

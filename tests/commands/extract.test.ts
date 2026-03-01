@@ -121,7 +121,7 @@ const runExtract = (
             continue;
 
           const maxLen = msgType === "user" ? 3000 : 800;
-          messages.push({ role: msgType, content: t.slice(0, maxLen) });
+          messages.push({ role: msgType, content: clean.slice(0, maxLen) });
         }
       }
 
