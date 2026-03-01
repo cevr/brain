@@ -33,6 +33,7 @@ What do you need?
 | `brain init [--project] [--global]`   | Scaffold vault, write config, wire hooks, install skills |
 | `brain snapshot <dir> [-o file]`      | Concatenate `.md` files with `=== path ===` delimiters   |
 | `brain extract <dir> <output> [-b N]` | Parse JSONL conversations into batched text files        |
+| `brain list [--json]`                 | List all vault files (one per line)                      |
 
 ## Vault Structure
 
