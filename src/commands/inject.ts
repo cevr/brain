@@ -1,11 +1,13 @@
-import { Command } from "effect/unstable/cli";
+import { Command, Flag } from "effect/unstable/cli";
 import { Console, Effect, Option } from "effect";
 import { ConfigService } from "../services/Config.js";
 import { VaultService } from "../services/Vault.js";
 
-export const inject = Command.make("inject").pipe(
+const jsonFlag = Flag.boolean("json").pipe(Flag.withDescription("Output as JSON"));
+
+export const inject = Command.make("inject", { json: jsonFlag }).pipe(
   Command.withDescription("Inject vault index into session (SessionStart hook)"),
-  Command.withHandler(() =>
+  Command.withHandler(({ json }) =>
     Effect.gen(function* () {
       const config = yield* ConfigService;
       const vault = yield* VaultService;
@@ -34,6 +36,18 @@ export const inject = Command.make("inject").pipe(
 
       // Both empty means no vault — already warned to stderr, exit cleanly
       if (globalIndex.length === 0 && projectIndex.length === 0) return;
+
+      if (json) {
+        // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
+        yield* Console.log(
+          JSON.stringify({
+            global: globalIndex,
+            project: Option.isSome(projectPath) && projectIndex.length > 0 ? projectIndex : null,
+            index: globalIndex + (projectIndex.length > 0 ? "\n" + projectIndex : ""),
+          }),
+        );
+        return;
+      }
 
       let output = "Brain vault — read relevant files before acting:\n\n";
       output += globalIndex;
