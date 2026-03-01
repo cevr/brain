@@ -236,11 +236,21 @@ const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function* (
   for (const file of starterFiles) {
     const content = yield* fs
       .readFile(path.join(starterDir, file))
-      .pipe(Effect.catch(() => Effect.succeed(new Uint8Array())));
+      .pipe(
+        Effect.mapError(
+          (e: PlatformError) =>
+            new ConfigError({ message: `Cannot read starter file ${file}: ${e.message}` }),
+        ),
+      );
     if (content.length > 0) {
       yield* fs
         .writeFile(path.join(principlesDir, file), content)
-        .pipe(Effect.catch(() => Effect.void));
+        .pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new ConfigError({ message: `Cannot write ${file}: ${e.message}` }),
+          ),
+        );
     }
   }
 
@@ -248,11 +258,21 @@ const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function* (
   const indexSrc = path.join(REPO_ROOT, "starter", "principles.md");
   const indexContent = yield* fs
     .readFile(indexSrc)
-    .pipe(Effect.catch(() => Effect.succeed(new Uint8Array())));
+    .pipe(
+      Effect.mapError(
+        (e: PlatformError) =>
+          new ConfigError({ message: `Cannot read starter principles.md: ${e.message}` }),
+      ),
+    );
   if (indexContent.length > 0) {
     yield* fs
       .writeFile(path.join(vaultPath, "principles.md"), indexContent)
-      .pipe(Effect.catch(() => Effect.void));
+      .pipe(
+        Effect.mapError(
+          (e: PlatformError) =>
+            new ConfigError({ message: `Cannot write principles.md: ${e.message}` }),
+        ),
+      );
   }
 });
 
