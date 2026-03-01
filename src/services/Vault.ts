@@ -262,7 +262,7 @@ export class VaultService extends ServiceMap.Service<
           );
 
         const mdFiles = files
-          .filter((f) => f.endsWith(".md") && !f.includes("node_modules/"))
+          .filter((f) => f.endsWith(".md") && !isIndexMd(f) && !f.includes("node_modules/"))
           .sort();
         const chunks: string[] = [];
 
