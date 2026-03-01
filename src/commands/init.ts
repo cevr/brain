@@ -295,23 +295,36 @@ const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function* (
 
   // Copy principles.md index
   const indexSrc = path.join(REPO_ROOT, "starter", "principles.md");
-  const indexContent = yield* fs
-    .readFile(indexSrc)
-    .pipe(
-      Effect.mapError(
-        (e: PlatformError) =>
-          new ConfigError({ message: `Cannot read starter principles.md: ${e.message}` }),
-      ),
-    );
-  if (indexContent.length > 0) {
-    yield* fs
-      .writeFile(path.join(vaultPath, "principles.md"), indexContent)
+  const indexSrcExists = yield* fs.exists(indexSrc).pipe(
+    Effect.catch((e) =>
+      isNotFound(e)
+        ? Effect.succeed(false)
+        : Effect.fail(
+            new ConfigError({
+              message: `Cannot check starter principles.md: ${(e as PlatformError).message}`,
+            }),
+          ),
+    ),
+  );
+  if (indexSrcExists) {
+    const indexContent = yield* fs
+      .readFile(indexSrc)
       .pipe(
         Effect.mapError(
           (e: PlatformError) =>
-            new ConfigError({ message: `Cannot write principles.md: ${e.message}` }),
+            new ConfigError({ message: `Cannot read starter principles.md: ${e.message}` }),
         ),
       );
+    if (indexContent.length > 0) {
+      yield* fs
+        .writeFile(path.join(vaultPath, "principles.md"), indexContent)
+        .pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new ConfigError({ message: `Cannot write principles.md: ${e.message}` }),
+          ),
+        );
+    }
   }
 });
 
@@ -339,7 +352,10 @@ const installSkills = Effect.fn("installSkills")(function* (
 
   // BRAIN_SKILLS_DIR overrides default
   const envSkillsDir = process.env["BRAIN_SKILLS_DIR"];
-  const targetDir = envSkillsDir ?? path.join(home, ".claude", "skills");
+  const targetDir =
+    envSkillsDir !== undefined && envSkillsDir.trim() !== ""
+      ? envSkillsDir
+      : path.join(home, ".claude", "skills");
 
   yield* fs
     .makeDirectory(targetDir, { recursive: true })
