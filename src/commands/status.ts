@@ -41,13 +41,13 @@ export const status = Command.make("status", { json: jsonFlag }).pipe(
         // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
         yield* Console.log(JSON.stringify(result));
       } else {
-        yield* Console.error(`Vault: ${result.vault}`);
-        yield* Console.error(`Files: ${result.files}`);
+        yield* Console.log(`Vault: ${result.vault}`);
+        yield* Console.log(`Files: ${result.files}`);
         const sectionParts = Object.entries(result.sections)
           .map(([k, v]) => `${k} (${v})`)
           .join(", ");
-        yield* Console.error(`Sections: ${sectionParts}`);
-        yield* Console.error(`Orphans: ${result.orphans.length}`);
+        yield* Console.log(`Sections: ${sectionParts}`);
+        yield* Console.log(`Orphans: ${result.orphans.length}`);
       }
     }),
   ),
