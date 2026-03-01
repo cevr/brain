@@ -380,7 +380,8 @@ export const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function
   }
 });
 
-const installSkills = Effect.fn("installSkills")(function* (
+/** @internal */
+export const installSkills = Effect.fn("installSkills")(function* (
   fs: FileSystem,
   path: Path,
   force: boolean,
@@ -474,7 +475,8 @@ const installSkills = Effect.fn("installSkills")(function* (
   return { installed, conflicts, target: targetDir };
 });
 
-const copyDir: (
+/** @internal */
+export const copyDir: (
   fs: FileSystem,
   p: Path,
   src: string,

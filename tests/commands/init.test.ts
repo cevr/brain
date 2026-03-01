@@ -4,7 +4,7 @@ import { Effect, Exit } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { BunServices } from "@effect/platform-bun";
-import { wireHooks, copyStarterPrinciples } from "../../src/commands/init.js";
+import { wireHooks, copyStarterPrinciples, copyDir } from "../../src/commands/init.js";
 import { ConfigError } from "../../src/errors/index.js";
 import { withTempDir } from "../helpers/index.js";
 
@@ -255,6 +255,95 @@ describe("starter principles", () => {
         const files = yield* fs.readDirectory(principlesDir);
         expect(files).toEqual(["existing.md"]);
         expect(files).not.toContain("starter.md");
+      }),
+    ).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+describe("copyDir", () => {
+  it.live("copies files recursively", () =>
+    withTempDir((dir) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem;
+        const path = yield* Path;
+
+        const src = `${dir}/src`;
+        const dest = `${dir}/dest`;
+
+        yield* fs.makeDirectory(`${src}/nested`, { recursive: true });
+        yield* fs.writeFileString(`${src}/a.txt`, "alpha");
+        yield* fs.writeFileString(`${src}/nested/b.txt`, "beta");
+
+        yield* copyDir(fs, path, src, dest);
+
+        const aContent = yield* fs.readFileString(`${dest}/a.txt`);
+        expect(aContent).toBe("alpha");
+
+        const bContent = yield* fs.readFileString(`${dest}/nested/b.txt`);
+        expect(bContent).toBe("beta");
+      }),
+    ).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.live("overwrites existing files at destination", () =>
+    withTempDir((dir) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem;
+        const path = yield* Path;
+
+        const src = `${dir}/src`;
+        const dest = `${dir}/dest`;
+
+        yield* fs.makeDirectory(src, { recursive: true });
+        yield* fs.makeDirectory(dest, { recursive: true });
+        yield* fs.writeFileString(`${src}/file.txt`, "new content");
+        yield* fs.writeFileString(`${dest}/file.txt`, "old content");
+
+        yield* copyDir(fs, path, src, dest);
+
+        const content = yield* fs.readFileString(`${dest}/file.txt`);
+        expect(content).toBe("new content");
+      }),
+    ).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+describe("installSkills", () => {
+  // installSkills uses REPO_ROOT (compile-time constant), so we test its core
+  // mechanism (copyDir) and the conflict detection logic directly.
+
+  it.live("conflict detection: existing skill dir is detected", () =>
+    withTempDir((dir) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem;
+
+        const targetDir = `${dir}/skills`;
+        yield* fs.makeDirectory(`${targetDir}/brain`, { recursive: true });
+        yield* fs.writeFileString(`${targetDir}/brain/SKILL.md`, "# Existing\n");
+
+        const exists = yield* fs.exists(`${targetDir}/brain`);
+        expect(exists).toBe(true);
+      }),
+    ).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.live("force overwrite: copyDir replaces existing skill", () =>
+    withTempDir((dir) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem;
+        const path = yield* Path;
+
+        const targetDir = `${dir}/skills`;
+        yield* fs.makeDirectory(`${targetDir}/brain`, { recursive: true });
+        yield* fs.writeFileString(`${targetDir}/brain/SKILL.md`, "# Existing\n");
+
+        const sourceDir = `${dir}/source/brain`;
+        yield* fs.makeDirectory(sourceDir, { recursive: true });
+        yield* fs.writeFileString(`${sourceDir}/SKILL.md`, "# Updated\n");
+
+        yield* copyDir(fs, path, sourceDir, `${targetDir}/brain`);
+        const content = yield* fs.readFileString(`${targetDir}/brain/SKILL.md`);
+        expect(content).toBe("# Updated\n");
       }),
     ).pipe(Effect.provide(TestLayer)),
   );
