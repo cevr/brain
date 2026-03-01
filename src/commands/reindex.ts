@@ -45,12 +45,10 @@ export const reindex = Command.make("reindex", {
           }),
         );
 
-        if (!result.changed) continue;
-
         if (json) {
           // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
           yield* Console.log(JSON.stringify(result));
-        } else {
+        } else if (result.changed) {
           yield* Console.error(
             `Reindexed ${vaultPath}/index.md (${result.files} files, ${result.sections.length} sections)`,
           );
