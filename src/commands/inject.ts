@@ -17,7 +17,7 @@ export const inject = Command.make("inject").pipe(
 
       const readIndexSafe = (p: string, opts: { required: boolean }) =>
         vault.readIndex(p).pipe(
-          Effect.catchTag("VaultError", (e) => {
+          Effect.catchTag("errors/VaultError", (e) => {
             if (e.message.includes("Cannot read index")) {
               if (opts.required) return Effect.fail(e);
               return Console.error(`Skipping project vault (no index): ${p}`).pipe(Effect.as(""));

@@ -16,12 +16,12 @@ export const status = Command.make("status", { json: jsonFlag }).pipe(
       const vaultPath = yield* config
         .activeVaultPath()
         .pipe(
-          Effect.catchTag("ConfigError", () =>
+          Effect.catchTag("errors/ConfigError", () =>
             Effect.fail(new VaultError({ message: "Vault not initialized — run `brain init`" })),
           ),
         );
       const result = yield* vault.status(vaultPath).pipe(
-        Effect.catchTag("VaultError", (e) => {
+        Effect.catchTag("errors/VaultError", (e) => {
           if (e.message.includes("Cannot read vault")) {
             return Effect.fail(
               new VaultError({ message: "Vault not initialized — run `brain init`" }),
