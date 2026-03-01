@@ -156,7 +156,9 @@ export class VaultService extends ServiceMap.Service<
               (m) => firstCapture(m).split("#")[0] ?? "",
             ),
           ),
-        ].sort();
+        ]
+          .filter((f) => !VAULT_SEED_FILES.has(f))
+          .sort();
 
         const diskStr = disk.join("\n");
         const indexedStr = indexed.join("\n");
