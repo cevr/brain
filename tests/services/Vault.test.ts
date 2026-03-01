@@ -209,6 +209,8 @@ describe("VaultService", () => {
           // principles.md (seed) + principles/testing + orphan + principles/unindexed = 4
           expect(s.files).toBe(4);
           expect(s.sections["principles"]).toBe(2);
+          // Root-level files (principles.md seed + orphan.md) bucketed under "other"
+          expect(s.sections["other"]).toBe(2);
           expect(s.orphans).toContain("principles/unindexed");
           // Seed file "principles" should NOT be reported as orphan
           expect(s.orphans).not.toContain("principles");

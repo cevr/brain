@@ -50,8 +50,8 @@ function dirPrefix(f: string): string {
 function extractSections(files: string[]): Record<string, number> {
   const sections: Record<string, number> = {};
   for (const f of files) {
-    const d = dirPrefix(f);
-    if (d !== "") sections[d] = (sections[d] ?? 0) + 1;
+    const section = dirPrefix(f) || "other";
+    sections[section] = (sections[section] ?? 0) + 1;
   }
   return sections;
 }
@@ -77,18 +77,16 @@ export class VaultService extends ServiceMap.Service<
       const path = yield* Path;
 
       const listMdFiles = Effect.fn("VaultService.listMdFiles")(function* (vaultPath: string) {
-        const entries = yield* fs
-          .readDirectory(vaultPath, { recursive: true })
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new VaultError({
-                  message: `Cannot read vault: ${e.message}`,
-                  code: "READ_FAILED",
-                  path: vaultPath,
-                }),
-            ),
-          );
+        const entries = yield* fs.readDirectory(vaultPath, { recursive: true }).pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new VaultError({
+                message: `Cannot read vault: ${e.message}`,
+                code: "READ_FAILED",
+                path: vaultPath,
+              }),
+          ),
+        );
         return entries
           .filter((f) => f.endsWith(".md") && !isIndexMd(f) && !f.includes("node_modules/"))
           .map((f) => f.replace(/\.md$/, ""))
@@ -98,18 +96,16 @@ export class VaultService extends ServiceMap.Service<
       const init = Effect.fn("VaultService.init")(function* (vaultPath: string) {
         const created: string[] = [];
 
-        yield* fs
-          .makeDirectory(vaultPath, { recursive: true })
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new VaultError({
-                  message: `Cannot create vault: ${e.message}`,
-                  code: "WRITE_FAILED",
-                  path: vaultPath,
-                }),
-            ),
-          );
+        yield* fs.makeDirectory(vaultPath, { recursive: true }).pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new VaultError({
+                message: `Cannot create vault: ${e.message}`,
+                code: "WRITE_FAILED",
+                path: vaultPath,
+              }),
+          ),
+        );
 
         for (const dir of VAULT_DIRS) {
           yield* fs.makeDirectory(path.join(vaultPath, dir), { recursive: true }).pipe(
@@ -221,18 +217,16 @@ export class VaultService extends ServiceMap.Service<
 
         lines.push("");
 
-        yield* fs
-          .writeFileString(indexPath, lines.join("\n"))
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new VaultError({
-                  message: `Cannot write index: ${e.message}`,
-                  code: "WRITE_FAILED",
-                  path: vaultPath,
-                }),
-            ),
-          );
+        yield* fs.writeFileString(indexPath, lines.join("\n")).pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new VaultError({
+                message: `Cannot write index: ${e.message}`,
+                code: "WRITE_FAILED",
+                path: vaultPath,
+              }),
+          ),
+        );
 
         return {
           vault: vaultPath,
@@ -244,18 +238,16 @@ export class VaultService extends ServiceMap.Service<
 
       const readIndex = Effect.fn("VaultService.readIndex")(function* (vaultPath: string) {
         const indexPath = path.join(vaultPath, "index.md");
-        return yield* fs
-          .readFileString(indexPath)
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new VaultError({
-                  message: `Cannot read index: ${e.message}`,
-                  code: "INDEX_MISSING",
-                  path: vaultPath,
-                }),
-            ),
-          );
+        return yield* fs.readFileString(indexPath).pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new VaultError({
+                message: `Cannot read index: ${e.message}`,
+                code: "INDEX_MISSING",
+                path: vaultPath,
+              }),
+          ),
+        );
       });
 
       const status = Effect.fn("VaultService.status")(function* (vaultPath: string) {
@@ -281,31 +273,23 @@ export class VaultService extends ServiceMap.Service<
         const filesForOrphans = files.filter((f) => f.includes("/") || !VAULT_SEED_FILES.has(f));
         const orphans = filesForOrphans.filter((f) => !indexed.has(f));
 
-        const sections: Record<string, number> = {};
-        for (const f of files) {
-          const section = dirPrefix(f) || "other";
-          sections[section] = (sections[section] ?? 0) + 1;
-        }
-
-        return { vault: vaultPath, files: files.length, sections, orphans };
+        return { vault: vaultPath, files: files.length, sections: extractSections(files), orphans };
       });
 
       const snapshot = Effect.fn("VaultService.snapshot")(function* (
         dirPath: string,
         outputPath: Option.Option<string>,
       ) {
-        const files = yield* fs
-          .readDirectory(dirPath, { recursive: true })
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new VaultError({
-                  message: `Cannot read directory: ${e.message}`,
-                  code: "READ_FAILED",
-                  path: dirPath,
-                }),
-            ),
-          );
+        const files = yield* fs.readDirectory(dirPath, { recursive: true }).pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new VaultError({
+                message: `Cannot read directory: ${e.message}`,
+                code: "READ_FAILED",
+                path: dirPath,
+              }),
+          ),
+        );
 
         const mdFiles = files
           .filter((f) => f.endsWith(".md") && !isIndexMd(f) && !f.includes("node_modules/"))
@@ -314,18 +298,16 @@ export class VaultService extends ServiceMap.Service<
 
         for (const file of mdFiles) {
           const fullPath = path.join(dirPath, file);
-          const content = yield* fs
-            .readFileString(fullPath)
-            .pipe(
-              Effect.mapError(
-                (e: PlatformError) =>
-                  new VaultError({
-                    message: `Cannot read ${file}: ${e.message}`,
-                    code: "READ_FAILED",
-                    path: dirPath,
-                  }),
-              ),
-            );
+          const content = yield* fs.readFileString(fullPath).pipe(
+            Effect.mapError(
+              (e: PlatformError) =>
+                new VaultError({
+                  message: `Cannot read ${file}: ${e.message}`,
+                  code: "READ_FAILED",
+                  path: dirPath,
+                }),
+            ),
+          );
           chunks.push(`=== ${file} ===`);
           chunks.push(content);
           chunks.push("");
