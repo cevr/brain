@@ -42,6 +42,10 @@ function isIndexMd(f: string): boolean {
   return f === "index.md" || f.endsWith("/index.md");
 }
 
+function filterMdFiles(entries: string[]): string[] {
+  return entries.filter((f) => f.endsWith(".md") && !isIndexMd(f) && !f.includes("node_modules/"));
+}
+
 function dirPrefix(f: string): string {
   const slash = f.indexOf("/");
   return slash === -1 ? "" : f.slice(0, slash);
@@ -87,8 +91,7 @@ export class VaultService extends ServiceMap.Service<
               }),
           ),
         );
-        return entries
-          .filter((f) => f.endsWith(".md") && !isIndexMd(f) && !f.includes("node_modules/"))
+        return filterMdFiles(entries)
           .map((f) => f.replace(/\.md$/, ""))
           .sort();
       });
@@ -291,9 +294,7 @@ export class VaultService extends ServiceMap.Service<
           ),
         );
 
-        const mdFiles = files
-          .filter((f) => f.endsWith(".md") && !isIndexMd(f) && !f.includes("node_modules/"))
-          .sort();
+        const mdFiles = filterMdFiles(files).sort();
         const chunks: string[] = [];
 
         for (const file of mdFiles) {

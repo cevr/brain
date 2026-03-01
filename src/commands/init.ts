@@ -5,6 +5,7 @@ import { Path } from "effect/Path";
 import { PlatformError } from "effect/PlatformError";
 import { ConfigService } from "../services/Config.js";
 import { VaultService } from "../services/Vault.js";
+import { BuildInfo } from "../services/BuildInfo.js";
 import { ConfigError } from "../errors/index.js";
 
 const projectFlag = Flag.boolean("project").pipe(
@@ -266,9 +267,9 @@ export const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function
   fs: FileSystem,
   path: Path,
   vaultPath: string,
-  repoRoot?: string,
 ) {
-  const root = repoRoot ?? REPO_ROOT;
+  const { repoRoot } = yield* BuildInfo;
+  const root = repoRoot;
   const principlesDir = path.join(vaultPath, "principles");
   const starterDir = path.join(root, "starter", "principles");
 
@@ -387,8 +388,8 @@ export const installSkills = Effect.fn("installSkills")(function* (
   force: boolean,
   settingsPath: string,
 ) {
-  // REPO_ROOT injected at compile time by scripts/build.ts
-  const sourceDir = path.join(REPO_ROOT, "skills");
+  const { repoRoot } = yield* BuildInfo;
+  const sourceDir = path.join(repoRoot, "skills");
 
   const sourceExists = yield* fs.exists(sourceDir).pipe(
     Effect.mapError(

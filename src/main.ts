@@ -5,6 +5,7 @@ import { Console, Effect, Layer } from "effect";
 import { command } from "./commands/index.js";
 import { ConfigService } from "./services/Config.js";
 import { VaultService } from "./services/Vault.js";
+import { BuildInfo } from "./services/BuildInfo.js";
 
 const APP_ERROR_TAGS = new Set([
   "@cvr/brain/BrainError",
@@ -22,7 +23,7 @@ const cli = Command.run(command, {
   version: typeof APP_VERSION !== "undefined" ? APP_VERSION : "0.0.0-dev",
 });
 
-const ServiceLayer = Layer.mergeAll(ConfigService.layer, VaultService.layer);
+const ServiceLayer = Layer.mergeAll(ConfigService.layer, VaultService.layer, BuildInfo.layer);
 
 const AppLayer = ServiceLayer.pipe(Layer.provideMerge(BunServices.layer));
 

@@ -21,7 +21,11 @@ brain snapshot "$VAULT" --output /tmp/brain-snapshot-ruminate.md
 ### 2. Locate conversations
 
 ```bash
-CONV_DIR=~/.claude/projects/-$(pwd | tr '/' '-')/
+# List project dirs and pick the one matching your project
+ls ~/.claude/projects/
+# The naming convention is: dash-separated absolute path with leading dash
+# e.g. /Users/you/project → -Users-you-project
+CONV_DIR=~/.claude/projects/<pick-matching-dir>/
 ```
 
 ### 3. Extract and batch

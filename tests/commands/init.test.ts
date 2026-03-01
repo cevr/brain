@@ -4,8 +4,14 @@ import { Effect, Exit } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { BunServices } from "@effect/platform-bun";
-import { wireHooks, copyStarterPrinciples, copyDir } from "../../src/commands/init.js";
+import {
+  wireHooks,
+  copyStarterPrinciples,
+  installSkills,
+  copyDir,
+} from "../../src/commands/init.js";
 import { ConfigError } from "../../src/errors/index.js";
+import { BuildInfo } from "../../src/services/BuildInfo.js";
 import { withTempDir } from "../helpers/index.js";
 
 const TestLayer = BunServices.layer;
@@ -217,7 +223,9 @@ describe("starter principles", () => {
         // Also create principles.md index in starter
         yield* fs.writeFileString(`${fakeRoot}/starter/principles.md`, "# Principles Index\n");
 
-        yield* copyStarterPrinciples(fs, path, vaultDir, fakeRoot);
+        yield* copyStarterPrinciples(fs, path, vaultDir).pipe(
+          Effect.provide(BuildInfo.layerTest({ repoRoot: fakeRoot })),
+        );
 
         const copied = yield* fs.readDirectory(principlesDir);
         expect(copied.sort()).toEqual(["first.md", "second.md"]);
@@ -250,7 +258,9 @@ describe("starter principles", () => {
         // Pre-existing file in principles
         yield* fs.writeFileString(`${principlesDir}/existing.md`, "# Existing\n");
 
-        yield* copyStarterPrinciples(fs, path, vaultDir, fakeRoot);
+        yield* copyStarterPrinciples(fs, path, vaultDir).pipe(
+          Effect.provide(BuildInfo.layerTest({ repoRoot: fakeRoot })),
+        );
 
         const files = yield* fs.readDirectory(principlesDir);
         expect(files).toEqual(["existing.md"]);
@@ -309,39 +319,117 @@ describe("copyDir", () => {
 });
 
 describe("installSkills", () => {
-  // installSkills uses REPO_ROOT (compile-time constant), so we test its core
-  // mechanism (copyDir) and the conflict detection logic directly.
-
-  it.live("conflict detection: existing skill dir is detected", () =>
-    withTempDir((dir) =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem;
-
-        const targetDir = `${dir}/skills`;
-        yield* fs.makeDirectory(`${targetDir}/brain`, { recursive: true });
-        yield* fs.writeFileString(`${targetDir}/brain/SKILL.md`, "# Existing\n");
-
-        const exists = yield* fs.exists(`${targetDir}/brain`);
-        expect(exists).toBe(true);
-      }),
-    ).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.live("force overwrite: copyDir replaces existing skill", () =>
+  it.live("copies skill directories from source to target", () =>
     withTempDir((dir) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem;
         const path = yield* Path;
 
-        const targetDir = `${dir}/skills`;
+        // Set up a fake repo root with a skill
+        const fakeRoot = `${dir}/repo`;
+        yield* fs.makeDirectory(`${fakeRoot}/skills/brain`, { recursive: true });
+        yield* fs.writeFileString(`${fakeRoot}/skills/brain/SKILL.md`, "# Brain Skill\n");
+
+        const settingsPath = `${dir}/claude/settings.json`;
+        yield* fs.makeDirectory(`${dir}/claude`, { recursive: true });
+
+        const origSkillsDir = process.env["BRAIN_SKILLS_DIR"];
+        const targetDir = `${dir}/skills-target`;
+        process.env["BRAIN_SKILLS_DIR"] = targetDir;
+
+        const result = yield* installSkills(fs, path, false, settingsPath).pipe(
+          Effect.provide(BuildInfo.layerTest({ repoRoot: fakeRoot })),
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (origSkillsDir === undefined) delete process.env["BRAIN_SKILLS_DIR"];
+              else process.env["BRAIN_SKILLS_DIR"] = origSkillsDir;
+            }),
+          ),
+        );
+
+        expect(result.installed).toContain("brain");
+        expect(result.conflicts).toHaveLength(0);
+
+        const skillContent = yield* fs.readFileString(`${targetDir}/brain/SKILL.md`);
+        expect(skillContent).toBe("# Brain Skill\n");
+      }),
+    ).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.live("detects conflicts and skips without --force", () =>
+    withTempDir((dir) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem;
+        const path = yield* Path;
+
+        const fakeRoot = `${dir}/repo`;
+        yield* fs.makeDirectory(`${fakeRoot}/skills/brain`, { recursive: true });
+        yield* fs.writeFileString(`${fakeRoot}/skills/brain/SKILL.md`, "# New\n");
+
+        const settingsPath = `${dir}/claude/settings.json`;
+        yield* fs.makeDirectory(`${dir}/claude`, { recursive: true });
+
+        const origSkillsDir = process.env["BRAIN_SKILLS_DIR"];
+        const targetDir = `${dir}/skills-target`;
+        process.env["BRAIN_SKILLS_DIR"] = targetDir;
+
+        // Pre-existing skill
         yield* fs.makeDirectory(`${targetDir}/brain`, { recursive: true });
         yield* fs.writeFileString(`${targetDir}/brain/SKILL.md`, "# Existing\n");
 
-        const sourceDir = `${dir}/source/brain`;
-        yield* fs.makeDirectory(sourceDir, { recursive: true });
-        yield* fs.writeFileString(`${sourceDir}/SKILL.md`, "# Updated\n");
+        const result = yield* installSkills(fs, path, false, settingsPath).pipe(
+          Effect.provide(BuildInfo.layerTest({ repoRoot: fakeRoot })),
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (origSkillsDir === undefined) delete process.env["BRAIN_SKILLS_DIR"];
+              else process.env["BRAIN_SKILLS_DIR"] = origSkillsDir;
+            }),
+          ),
+        );
 
-        yield* copyDir(fs, path, sourceDir, `${targetDir}/brain`);
+        expect(result.installed).toHaveLength(0);
+        expect(result.conflicts).toContain("brain");
+
+        // Original content preserved
+        const content = yield* fs.readFileString(`${targetDir}/brain/SKILL.md`);
+        expect(content).toBe("# Existing\n");
+      }),
+    ).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.live("--force-skills overwrites existing", () =>
+    withTempDir((dir) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem;
+        const path = yield* Path;
+
+        const fakeRoot = `${dir}/repo`;
+        yield* fs.makeDirectory(`${fakeRoot}/skills/brain`, { recursive: true });
+        yield* fs.writeFileString(`${fakeRoot}/skills/brain/SKILL.md`, "# Updated\n");
+
+        const settingsPath = `${dir}/claude/settings.json`;
+        yield* fs.makeDirectory(`${dir}/claude`, { recursive: true });
+
+        const origSkillsDir = process.env["BRAIN_SKILLS_DIR"];
+        const targetDir = `${dir}/skills-target`;
+        process.env["BRAIN_SKILLS_DIR"] = targetDir;
+
+        yield* fs.makeDirectory(`${targetDir}/brain`, { recursive: true });
+        yield* fs.writeFileString(`${targetDir}/brain/SKILL.md`, "# Old\n");
+
+        const result = yield* installSkills(fs, path, true, settingsPath).pipe(
+          Effect.provide(BuildInfo.layerTest({ repoRoot: fakeRoot })),
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (origSkillsDir === undefined) delete process.env["BRAIN_SKILLS_DIR"];
+              else process.env["BRAIN_SKILLS_DIR"] = origSkillsDir;
+            }),
+          ),
+        );
+
+        expect(result.installed).toContain("brain");
+        expect(result.conflicts).toHaveLength(0);
+
         const content = yield* fs.readFileString(`${targetDir}/brain/SKILL.md`);
         expect(content).toBe("# Updated\n");
       }),

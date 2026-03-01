@@ -102,11 +102,27 @@ Read `brain/index.md` and the relevant entrypoint for your topic. Scan nearby fi
 - `brain status` shows orphans (files not linked from any index)
 - Run `brain reindex` to rebuild index from disk
 
+## Error Recovery
+
+All commands emit structured errors with `code` fields. With `--json`, errors output as:
+
+```json
+{
+  "error": "@cvr/brain/VaultError",
+  "code": "NOT_INITIALIZED",
+  "message": "Vault not initialized — run `brain init`"
+}
+```
+
+Common error codes: `NOT_INITIALIZED`, `READ_FAILED`, `WRITE_FAILED`, `INDEX_MISSING`, `PARSE_FAILED`, `INVALID_DATE`.
+
+`brain inject` is resilient — prints warning to stderr and exits 0 when vault is missing (hooks must never crash sessions).
+
 ## Gotchas
 
 - `brain reindex` is a no-op if nothing changed — silence is success
 - `brain init` is idempotent — safe to re-run
-- The PostToolUse hook matcher is `brain/` — it fires on any tool output containing that string
+- The PostToolUse hook matcher is `brain/` — it fires on any tool output containing that string, including paths and error messages. This is intentionally broad
 - `brain vault` returns the project vault if inside one, otherwise global
 - Hooks are wired into `~/.claude/settings.json` — existing hooks preserved
 - `brain snapshot` outputs to stdout by default, use `-o` for file output
