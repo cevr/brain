@@ -111,8 +111,16 @@ export const extractConversations = Effect.fn("extractConversations")(function* 
       const msgType = parsed["type"] as string | undefined;
       if (msgType !== "user" && msgType !== "assistant") continue;
 
-      // Skip meta messages (tool results, etc.)
-      if (parsed["isMeta"] === true || parsed["subType"] !== undefined) continue;
+      // Skip meta messages and tool-related subTypes (preserve thinking, etc.)
+      if (parsed["isMeta"] === true) continue;
+      const subType = parsed["subType"] as string | undefined;
+      if (
+        subType === "tool_use" ||
+        subType === "tool_result" ||
+        subType === "mcp_tool_use" ||
+        subType === "mcp_tool_result"
+      )
+        continue;
 
       // Content is nested under message
       const msg = parsed["message"];
