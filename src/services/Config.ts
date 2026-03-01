@@ -32,7 +32,12 @@ export class ConfigService extends ServiceMap.Service<
       const fs = yield* FileSystem;
       const path = yield* Path;
 
-      const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "/tmp";
+      const home = process.env["HOME"] ?? process.env["USERPROFILE"];
+      if (home === undefined) {
+        return yield* Effect.die(
+          new ConfigError({ message: "HOME environment variable is not set", code: "READ_FAILED" }),
+        );
+      }
       const xdgConfig = process.env["XDG_CONFIG_HOME"] ?? path.join(home, ".config");
 
       const resolveConfigFilePath = () =>
@@ -40,29 +45,25 @@ export class ConfigService extends ServiceMap.Service<
 
       const loadConfigFile = Effect.fn("ConfigService.loadConfigFile")(function* () {
         const cfgPath = path.join(xdgConfig, "brain", "config.json");
-        const exists = yield* fs
-          .exists(cfgPath)
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new ConfigError({
-                  message: `Cannot check config: ${e.message}`,
-                  code: "READ_FAILED",
-                }),
-            ),
-          );
+        const exists = yield* fs.exists(cfgPath).pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new ConfigError({
+                message: `Cannot check config: ${e.message}`,
+                code: "READ_FAILED",
+              }),
+          ),
+        );
         if (!exists) return {};
-        const text = yield* fs
-          .readFileString(cfgPath)
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new ConfigError({
-                  message: `Cannot read config: ${e.message}`,
-                  code: "READ_FAILED",
-                }),
-            ),
-          );
+        const text = yield* fs.readFileString(cfgPath).pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new ConfigError({
+                message: `Cannot read config: ${e.message}`,
+                code: "READ_FAILED",
+              }),
+          ),
+        );
         return yield* decodeConfigFile(text).pipe(
           Effect.catch((e) =>
             Console.error(`Warning: corrupt config, using defaults: ${e}`).pipe(Effect.as({})),

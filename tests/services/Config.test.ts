@@ -54,7 +54,7 @@ describe("ConfigService", () => {
       return Effect.gen(function* () {
         const config = yield* ConfigService;
         const result = yield* config.globalVaultPath();
-        const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "/tmp";
+        const home = process.env["HOME"] ?? process.env["USERPROFILE"];
         expect(result).toBe(`${home}/.brain`);
       })
         .pipe(Effect.provide(makeTestLayer()))
@@ -124,7 +124,7 @@ describe("ConfigService", () => {
       Effect.gen(function* () {
         const config = yield* ConfigService;
         const result = yield* config.claudeSettingsPath();
-        const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "/tmp";
+        const home = process.env["HOME"] ?? process.env["USERPROFILE"];
         expect(result).toBe(`${home}/.claude/settings.json`);
       }).pipe(Effect.provide(makeTestLayer())),
     );

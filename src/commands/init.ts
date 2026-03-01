@@ -90,7 +90,7 @@ export const init = Command.make("init", {
 
       const skillResult = skipSkills
         ? { installed: [] as string[], conflicts: [] as string[], target: "" }
-        : yield* installSkills(fs, path, forceSkills);
+        : yield* installSkills(fs, path, forceSkills, settingsPath);
 
       if (json) {
         // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
@@ -376,9 +376,8 @@ const installSkills = Effect.fn("installSkills")(function* (
   fs: FileSystem,
   path: Path,
   force: boolean,
+  settingsPath: string,
 ) {
-  const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "/tmp";
-
   // REPO_ROOT injected at compile time by scripts/build.ts
   const sourceDir = path.join(REPO_ROOT, "skills");
 
@@ -395,12 +394,12 @@ const installSkills = Effect.fn("installSkills")(function* (
     return { installed: [], conflicts: [], target: "" };
   }
 
-  // BRAIN_SKILLS_DIR overrides default
+  // BRAIN_SKILLS_DIR overrides default; derive ~/.claude from settings path
   const envSkillsDir = process.env["BRAIN_SKILLS_DIR"];
   const targetDir =
     envSkillsDir !== undefined && envSkillsDir.trim() !== ""
       ? envSkillsDir
-      : path.join(home, ".claude", "skills");
+      : path.join(path.dirname(settingsPath), "skills");
 
   yield* fs.makeDirectory(targetDir, { recursive: true }).pipe(
     Effect.mapError(
