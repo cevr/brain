@@ -119,7 +119,8 @@ export const init = Command.make("init", {
   ),
 );
 
-const wireHooks = Effect.fn("wireHooks")(function* (
+/** @internal */
+export const wireHooks = Effect.fn("wireHooks")(function* (
   fs: FileSystem,
   path: Path,
   settingsPath: string,

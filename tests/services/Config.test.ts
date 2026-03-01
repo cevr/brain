@@ -29,35 +29,43 @@ const makeTestLayer = (fsOverrides?: Partial<FileSystem>) =>
 
 describe("ConfigService", () => {
   describe("globalVaultPath", () => {
-    it.live("returns BRAIN_DIR env when set", () =>
-      Effect.gen(function* () {
-        const original = process.env["BRAIN_DIR"];
-        try {
-          process.env["BRAIN_DIR"] = "/custom/brain";
-          const config = yield* ConfigService;
-          const result = yield* config.globalVaultPath();
-          expect(result).toBe("/custom/brain");
-        } finally {
-          if (original === undefined) delete process.env["BRAIN_DIR"];
-          else process.env["BRAIN_DIR"] = original;
-        }
-      }).pipe(Effect.provide(makeTestLayer())),
-    );
+    it.live("returns BRAIN_DIR env when set", () => {
+      const original = process.env["BRAIN_DIR"];
+      process.env["BRAIN_DIR"] = "/custom/brain";
+      return Effect.gen(function* () {
+        const config = yield* ConfigService;
+        const result = yield* config.globalVaultPath();
+        expect(result).toBe("/custom/brain");
+      })
+        .pipe(Effect.provide(makeTestLayer()))
+        .pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (original === undefined) delete process.env["BRAIN_DIR"];
+              else process.env["BRAIN_DIR"] = original;
+            }),
+          ),
+        );
+    });
 
-    it.live("falls back to ~/.brain when no env or config", () =>
-      Effect.gen(function* () {
-        const original = process.env["BRAIN_DIR"];
-        try {
-          delete process.env["BRAIN_DIR"];
-          const config = yield* ConfigService;
-          const result = yield* config.globalVaultPath();
-          const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "/tmp";
-          expect(result).toBe(`${home}/.brain`);
-        } finally {
-          if (original !== undefined) process.env["BRAIN_DIR"] = original;
-        }
-      }).pipe(Effect.provide(makeTestLayer())),
-    );
+    it.live("falls back to ~/.brain when no env or config", () => {
+      const original = process.env["BRAIN_DIR"];
+      delete process.env["BRAIN_DIR"];
+      return Effect.gen(function* () {
+        const config = yield* ConfigService;
+        const result = yield* config.globalVaultPath();
+        const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "/tmp";
+        expect(result).toBe(`${home}/.brain`);
+      })
+        .pipe(Effect.provide(makeTestLayer()))
+        .pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (original !== undefined) process.env["BRAIN_DIR"] = original;
+            }),
+          ),
+        );
+    });
   });
 
   describe("loadConfigFile", () => {

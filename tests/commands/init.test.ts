@@ -4,10 +4,7 @@ import { Effect } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { BunServices } from "@effect/platform-bun";
-
-// wireHooks and copyStarterPrinciples are private to init.ts.
-// We replicate the wireHooks logic here for isolated testing.
-// This tests the hook-wiring algorithm, not the Command handler.
+import { wireHooks } from "../../src/commands/init.js";
 
 const TestLayer = BunServices.layer;
 
@@ -17,70 +14,6 @@ const withTempDir = <A, E>(fn: (dir: string) => Effect.Effect<A, E, FileSystem |
     const dir = yield* fs.makeTempDirectoryScoped();
     return yield* fn(dir);
   }).pipe(Effect.scoped);
-
-// Inline replica of wireHooks from init.ts for testing
-const wireHooks = (fs: FileSystem, path: Path, settingsPath: string) =>
-  Effect.gen(function* () {
-    const dir = path.dirname(settingsPath);
-    yield* fs.makeDirectory(dir, { recursive: true });
-
-    const existing = yield* fs
-      .readFileString(settingsPath)
-      .pipe(Effect.catch(() => Effect.succeed("{}")));
-    const parsed = JSON.parse(existing) as Record<string, unknown>;
-
-    const rawHooks = parsed["hooks"];
-    const hooks: Record<string, unknown[]> =
-      typeof rawHooks === "object" && rawHooks !== null && !Array.isArray(rawHooks)
-        ? (rawHooks as Record<string, unknown[]>)
-        : {};
-
-    let changed = false;
-
-    const sessionStartHook = {
-      matcher: "startup|resume",
-      hooks: [{ type: "command", command: "brain inject" }],
-    };
-
-    const postToolUseHook = {
-      matcher: "brain/",
-      hooks: [{ type: "command", command: "brain reindex" }],
-    };
-
-    const sessionStart = (hooks["SessionStart"] ?? []) as Array<{
-      matcher?: string;
-      hooks?: Array<{ command?: string }>;
-    }>;
-    const brainInjectIdx = sessionStart.findIndex(
-      (h) => h?.hooks?.some((hh) => hh.command === "brain inject") ?? false,
-    );
-    if (brainInjectIdx === -1) {
-      hooks["SessionStart"] = [...sessionStart, sessionStartHook];
-      changed = true;
-    } else if (sessionStart[brainInjectIdx]?.matcher !== "startup|resume") {
-      sessionStart[brainInjectIdx] = { ...sessionStart[brainInjectIdx], matcher: "startup|resume" };
-      hooks["SessionStart"] = sessionStart;
-      changed = true;
-    }
-
-    const postToolUse = (hooks["PostToolUse"] ?? []) as Array<{
-      hooks?: Array<{ command?: string }>;
-    }>;
-    const hasBrainReindex = postToolUse.some(
-      (h) => h?.hooks?.some((hh) => hh.command === "brain reindex") ?? false,
-    );
-    if (!hasBrainReindex) {
-      hooks["PostToolUse"] = [...postToolUse, postToolUseHook];
-      changed = true;
-    }
-
-    if (changed) {
-      parsed["hooks"] = hooks;
-      yield* fs.writeFileString(settingsPath, JSON.stringify(parsed, null, 2) + "\n");
-    }
-
-    return changed;
-  });
 
 const readSettings = (fs: FileSystem, path: string) =>
   fs.readFileString(path).pipe(Effect.map((s) => JSON.parse(s) as Record<string, unknown>));

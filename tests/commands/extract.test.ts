@@ -1,15 +1,11 @@
 /** @effect-diagnostics effect/strictEffectProvide:skip-file effect/strictBooleanExpressions:skip-file effect/tryCatchInEffectGen:skip-file effect/preferSchemaOverJson:skip-file */
 import { describe, it, expect } from "effect-bun-test";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { BunServices } from "@effect/platform-bun";
 import { utimesSync } from "node:fs";
-
-// extract command uses FileSystem/Path directly — we import the handler's
-// internal logic by running the command's effect with FS/Path layers.
-// Since the command is wired via Command.make, we test by writing JSONL files
-// and invoking the extraction effect pattern directly.
+import { extractConversations } from "../../src/commands/extract.js";
 
 const TestLayer = BunServices.layer;
 
@@ -36,134 +32,16 @@ const assistantMsg = (content: string) => ({
   message: { content },
 });
 
-// Run the extract logic inline (replicate the command's core loop)
-// This avoids dealing with Command.run which needs argv parsing
+// Thin wrapper around the real extractConversations
 const runExtract = (
   inputDir: string,
   outputDir: string,
   opts: { batches?: number; from?: string; to?: string } = {},
 ) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem;
-    const path = yield* Path;
-
-    const fromMs = opts.from ? new Date(opts.from).getTime() : undefined;
-    const toMs = opts.to ? new Date(opts.to).getTime() + 86400000 - 1 : undefined;
-
-    const files = yield* fs.readDirectory(inputDir);
-    const jsonlFiles = files.filter((f) => f.endsWith(".jsonl")).sort();
-
-    interface Message {
-      role: string;
-      content: string;
-    }
-    interface Conversation {
-      uuid: string;
-      messages: Message[];
-      modifiedAt: Date;
-    }
-
-    const conversations: Conversation[] = [];
-
-    for (const file of jsonlFiles) {
-      const fullPath = path.join(inputDir, file);
-      const stat = yield* fs.stat(fullPath);
-
-      if ((stat.size ?? 0) < 500) continue;
-
-      const mtime = stat.mtime ?? new Date(0);
-      const mtimeMs = mtime.getTime();
-
-      if (fromMs !== undefined && mtimeMs < fromMs) continue;
-      if (toMs !== undefined && mtimeMs > toMs) continue;
-
-      const content = yield* fs.readFileString(fullPath);
-      const lines = content.trim().split("\n");
-      const messages: Message[] = [];
-
-      for (const line of lines) {
-        if (line.trim().length === 0) continue;
-        let parsed: Record<string, unknown>;
-        try {
-          parsed = JSON.parse(line) as Record<string, unknown>;
-        } catch {
-          continue;
-        }
-
-        const msgType = parsed["type"] as string | undefined;
-        if (msgType !== "user" && msgType !== "assistant") continue;
-        if (parsed["isMeta"] === true) continue;
-
-        const msg = parsed["message"];
-        if (typeof msg !== "object" || msg === null) continue;
-        const msgObj = msg as Record<string, unknown>;
-        const rawContent = msgObj["content"];
-
-        const texts: string[] = [];
-        if (typeof rawContent === "string") {
-          texts.push(rawContent);
-        } else if (Array.isArray(rawContent)) {
-          for (const c of rawContent as Array<Record<string, unknown>>) {
-            if (
-              typeof c === "object" &&
-              c !== null &&
-              c["type"] === "text" &&
-              typeof c["text"] === "string"
-            ) {
-              texts.push(c["text"] as string);
-            }
-          }
-        }
-
-        for (const t of texts) {
-          const clean = t.trim();
-          if (clean.length <= 10) continue;
-          if (clean.startsWith("<system-reminder>") && clean.endsWith("</system-reminder>"))
-            continue;
-
-          const maxLen = msgType === "user" ? 3000 : 800;
-          messages.push({ role: msgType, content: clean.slice(0, maxLen) });
-        }
-      }
-
-      if (messages.length < 2) continue;
-
-      const uuid = file.replace(".jsonl", "");
-      conversations.push({ uuid, messages, modifiedAt: mtime });
-    }
-
-    conversations.sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
-
-    yield* fs.makeDirectory(outputDir, { recursive: true });
-
-    const writtenPaths: string[] = [];
-
-    for (const [idx, conv] of conversations.entries()) {
-      const outLines: string[] = [];
-      for (const msg of conv.messages) {
-        const tag = msg.role === "user" ? "[USER]:" : "[ASSISTANT]:";
-        outLines.push(`${tag} ${msg.content}`);
-      }
-      const outFile = path.join(outputDir, `${String(idx).padStart(3, "0")}_${conv.uuid}.txt`);
-      yield* fs.writeFileString(outFile, outLines.join("\n\n"));
-      writtenPaths.push(outFile);
-    }
-
-    const batchCount = Math.min(opts.batches ?? 3, Math.max(1, writtenPaths.length));
-    const batchSize = Math.max(1, Math.ceil(writtenPaths.length / batchCount));
-    const batchDir = path.join(outputDir, "batches");
-    yield* fs.makeDirectory(batchDir, { recursive: true });
-
-    const batchPaths: string[] = [];
-    for (let b = 0; b < batchCount; b++) {
-      const batchFiles = writtenPaths.slice(b * batchSize, (b + 1) * batchSize);
-      if (batchFiles.length === 0) continue;
-      const batchPath = path.join(batchDir, `batch_${b}.txt`);
-      yield* fs.writeFileString(batchPath, batchFiles.join("\n") + "\n");
-      batchPaths.push(batchPath);
-    }
-
-    return { conversations, writtenPaths, batchPaths };
+  extractConversations(inputDir, outputDir, {
+    batches: opts.batches,
+    from: opts.from ? Option.some(opts.from) : Option.none(),
+    to: opts.to ? Option.some(opts.to) : Option.none(),
   });
 
 describe("extract", () => {
