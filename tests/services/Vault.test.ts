@@ -99,8 +99,8 @@ describe("VaultService", () => {
           const result = yield* vault.rebuildIndex(dir);
 
           expect(result.changed).toBe(true);
-          expect(result.sections).toContain("principles");
-          expect(result.sections).toContain("plans");
+          expect(result.sections).toHaveProperty("principles");
+          expect(result.sections).toHaveProperty("plans");
 
           const content = yield* fs.readFileString(`${dir}/index.md`);
           expect(content).toContain("## Principles");

@@ -50,7 +50,7 @@ export const reindex = Command.make("reindex", {
           yield* Console.log(JSON.stringify(result));
         } else if (result.changed) {
           yield* Console.error(
-            `Reindexed ${vaultPath}/index.md (${result.files} files, ${result.sections.length} sections)`,
+            `Reindexed ${vaultPath}/index.md (${result.files} files, ${Object.keys(result.sections).length} sections)`,
           );
         }
       }

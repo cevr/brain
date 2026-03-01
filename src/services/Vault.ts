@@ -19,7 +19,7 @@ interface VaultStatus {
 interface ReindexResult {
   readonly vault: string;
   readonly files: number;
-  readonly sections: string[];
+  readonly sections: Record<string, number>;
   readonly changed: boolean;
 }
 
@@ -47,13 +47,13 @@ function dirPrefix(f: string): string {
   return slash === -1 ? "" : f.slice(0, slash);
 }
 
-function extractSections(files: string[]): string[] {
-  const dirs = new Set<string>();
+function extractSections(files: string[]): Record<string, number> {
+  const sections: Record<string, number> = {};
   for (const f of files) {
     const d = dirPrefix(f);
-    if (d !== "") dirs.add(d);
+    if (d !== "") sections[d] = (sections[d] ?? 0) + 1;
   }
-  return [...dirs].sort();
+  return sections;
 }
 
 export class VaultService extends ServiceMap.Service<
@@ -189,7 +189,7 @@ export class VaultService extends ServiceMap.Service<
 
         const lines: string[] = ["# Brain"];
 
-        for (const section of dirs) {
+        for (const section of Object.keys(dirs).sort()) {
           const files = disk.filter((f) => f.startsWith(`${section}/`));
           if (files.length === 0) continue;
           const header = section.charAt(0).toUpperCase() + section.slice(1);
