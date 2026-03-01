@@ -1,10 +1,11 @@
 /** @effect-diagnostics effect/strictEffectProvide:skip-file effect/preferSchemaOverJson:skip-file */
 import { describe, it, expect } from "effect-bun-test";
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { BunServices } from "@effect/platform-bun";
 import { wireHooks, copyStarterPrinciples } from "../../src/commands/init.js";
+import { ConfigError } from "../../src/errors/index.js";
 
 const TestLayer = BunServices.layer;
 
@@ -131,6 +132,32 @@ describe("wireHooks", () => {
       }),
     ).pipe(Effect.provide(TestLayer)),
   );
+
+  for (const [label, content] of [
+    ["null", "null"],
+    ["array", "[]"],
+    ["boolean", "true"],
+  ] as const) {
+    it.live(`rejects malformed settings.json (${label})`, () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          const path = yield* Path;
+          const settingsPath = `${dir}/settings.json`;
+
+          yield* fs.writeFileString(settingsPath, content);
+
+          const exit = yield* wireHooks(fs, path, settingsPath).pipe(Effect.exit);
+
+          expect(Exit.isFailure(exit)).toBe(true);
+          if (Exit.isFailure(exit)) {
+            const reasons = exit.cause.reasons as unknown as ReadonlyArray<{ error: unknown }>;
+            expect(reasons[0]!.error).toBeInstanceOf(ConfigError);
+          }
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+  }
 });
 
 describe("starter principles", () => {

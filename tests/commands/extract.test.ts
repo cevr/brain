@@ -177,6 +177,67 @@ describe("extract", () => {
         }),
       ).pipe(Effect.provide(TestLayer)),
     );
+
+    it.live("preserves messages with subType: thinking", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          const inputDir = `${dir}/input`;
+          const outputDir = `${dir}/output`;
+          yield* fs.makeDirectory(inputDir, { recursive: true });
+
+          yield* writeJsonl(fs, `${inputDir}/conv1.jsonl`, [
+            userMsg("User message that is long enough to pass the content filter check"),
+            {
+              type: "assistant",
+              subType: "thinking",
+              message: { content: "Extended thinking content that is long enough to pass filter" },
+            },
+            assistantMsg("Assistant response that is long enough to pass the content filter"),
+            { type: "padding", message: { content: "x".repeat(500) } },
+          ]);
+
+          const result = yield* runExtract(inputDir, outputDir);
+
+          expect(result.conversations).toHaveLength(1);
+          // thinking message + user + assistant = 3 messages
+          expect(result.conversations[0]!.messages).toHaveLength(3);
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("skips tool_use and tool_result subTypes", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          const inputDir = `${dir}/input`;
+          const outputDir = `${dir}/output`;
+          yield* fs.makeDirectory(inputDir, { recursive: true });
+
+          yield* writeJsonl(fs, `${inputDir}/conv1.jsonl`, [
+            userMsg("User message that is long enough to pass the content filter check"),
+            {
+              type: "assistant",
+              subType: "tool_use",
+              message: { content: "Tool use content that should be filtered out entirely" },
+            },
+            {
+              type: "user",
+              subType: "tool_result",
+              message: { content: "Tool result content that should be filtered out entirely" },
+            },
+            assistantMsg("Assistant response that is long enough to pass the content filter"),
+            { type: "padding", message: { content: "x".repeat(500) } },
+          ]);
+
+          const result = yield* runExtract(inputDir, outputDir);
+
+          expect(result.conversations).toHaveLength(1);
+          // Only user + assistant = 2 messages (tool_use and tool_result skipped)
+          expect(result.conversations[0]!.messages).toHaveLength(2);
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
   });
 
   describe("date filtering", () => {
@@ -395,6 +456,24 @@ describe("extract", () => {
           // Each batch manifest lists file paths
           const batch0 = yield* fs.readFileString(result.batchPaths[0]!);
           expect(batch0.trim().split("\n").length).toBe(2);
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("0 conversations produces empty batchPaths", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          const inputDir = `${dir}/input`;
+          const outputDir = `${dir}/output`;
+          yield* fs.makeDirectory(inputDir, { recursive: true });
+
+          // No jsonl files at all
+          const result = yield* runExtract(inputDir, outputDir);
+
+          expect(result.conversations).toHaveLength(0);
+          expect(result.writtenPaths).toHaveLength(0);
+          expect(result.batchPaths).toHaveLength(0);
         }),
       ).pipe(Effect.provide(TestLayer)),
     );

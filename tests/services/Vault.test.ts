@@ -172,6 +172,24 @@ describe("VaultService", () => {
         }),
       ).pipe(Effect.provide(TestLayer)),
     );
+
+    it.live("excludes seed file principles from auto-index Other section", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const vault = yield* VaultService;
+          const fs = yield* FileSystem;
+
+          yield* vault.init(dir);
+          // principles.md is a seed file created by init
+
+          yield* vault.rebuildIndex(dir);
+
+          const content = yield* fs.readFileString(`${dir}/index.md`);
+          // principles should NOT appear under Other
+          expect(content).not.toContain("- [[principles]]");
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
   });
 
   describe("status", () => {
@@ -198,6 +216,8 @@ describe("VaultService", () => {
           expect(s.files).toBe(4);
           expect(s.sections["principles"]).toBe(2);
           expect(s.orphans).toContain("principles/unindexed");
+          // Seed file "principles" should NOT be reported as orphan
+          expect(s.orphans).not.toContain("principles");
         }),
       ).pipe(Effect.provide(TestLayer)),
     );

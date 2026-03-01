@@ -1,6 +1,6 @@
 /** @effect-diagnostics effect/strictEffectProvide:skip-file effect/strictBooleanExpressions:skip-file effect/unnecessaryPipeChain:skip-file */
 import { describe, it, expect } from "effect-bun-test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import type { FileSystem } from "effect/FileSystem";
 import { layerNoop } from "effect/FileSystem";
 import { PlatformError, SystemError } from "effect/PlatformError";
@@ -128,5 +128,69 @@ describe("ConfigService", () => {
         expect(result).toBe(`${home}/.claude/settings.json`);
       }).pipe(Effect.provide(makeTestLayer())),
     );
+  });
+
+  describe("projectVaultPath", () => {
+    it.live("returns Some when CLAUDE_PROJECT_DIR has brain/index.md", () => {
+      const origClaude = process.env["CLAUDE_PROJECT_DIR"];
+      const origBrain = process.env["BRAIN_PROJECT_DIR"];
+      process.env["CLAUDE_PROJECT_DIR"] = "/projects/myapp";
+      delete process.env["BRAIN_PROJECT_DIR"];
+      const layer = makeTestLayer({
+        exists: (path) =>
+          path === "/projects/myapp/brain/index.md" ? Effect.succeed(true) : Effect.succeed(false),
+        readFileString: () => notFound(),
+        writeFileString: () => Effect.void,
+        makeDirectory: () => Effect.void,
+      });
+      return Effect.gen(function* () {
+        const config = yield* ConfigService;
+        const result = yield* config.projectVaultPath();
+        expect(Option.isSome(result)).toBe(true);
+        if (Option.isSome(result)) {
+          expect(result.value).toBe("/projects/myapp/brain");
+        }
+      })
+        .pipe(Effect.provide(layer))
+        .pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (origClaude === undefined) delete process.env["CLAUDE_PROJECT_DIR"];
+              else process.env["CLAUDE_PROJECT_DIR"] = origClaude;
+              if (origBrain === undefined) delete process.env["BRAIN_PROJECT_DIR"];
+              else process.env["BRAIN_PROJECT_DIR"] = origBrain;
+            }),
+          ),
+        );
+    });
+
+    it.live("returns None when CLAUDE_PROJECT_DIR brain/ has no index.md", () => {
+      const origClaude = process.env["CLAUDE_PROJECT_DIR"];
+      const origBrain = process.env["BRAIN_PROJECT_DIR"];
+      process.env["CLAUDE_PROJECT_DIR"] = "/projects/myapp";
+      delete process.env["BRAIN_PROJECT_DIR"];
+      const layer = makeTestLayer({
+        exists: () => Effect.succeed(false),
+        readFileString: () => notFound(),
+        writeFileString: () => Effect.void,
+        makeDirectory: () => Effect.void,
+      });
+      return Effect.gen(function* () {
+        const config = yield* ConfigService;
+        const result = yield* config.projectVaultPath();
+        expect(Option.isNone(result)).toBe(true);
+      })
+        .pipe(Effect.provide(layer))
+        .pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (origClaude === undefined) delete process.env["CLAUDE_PROJECT_DIR"];
+              else process.env["CLAUDE_PROJECT_DIR"] = origClaude;
+              if (origBrain === undefined) delete process.env["BRAIN_PROJECT_DIR"];
+              else process.env["BRAIN_PROJECT_DIR"] = origBrain;
+            }),
+          ),
+        );
+    });
   });
 });
