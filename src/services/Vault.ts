@@ -30,6 +30,10 @@ function firstCapture(m: RegExpExecArray | RegExpMatchArray): string {
   return m[1] ?? "";
 }
 
+function isIndexMd(f: string): boolean {
+  return f === "index.md" || f.endsWith("/index.md");
+}
+
 function dirPrefix(f: string): string {
   const slash = f.indexOf("/");
   return slash === -1 ? "" : f.slice(0, slash);
@@ -74,9 +78,7 @@ export class VaultService extends ServiceMap.Service<
             ),
           );
         return entries
-          .filter(
-            (f) => f.endsWith(".md") && !f.endsWith("index.md") && !f.includes("node_modules/"),
-          )
+          .filter((f) => f.endsWith(".md") && !isIndexMd(f) && !f.includes("node_modules/"))
           .map((f) => f.replace(/\.md$/, ""))
           .sort();
       });
