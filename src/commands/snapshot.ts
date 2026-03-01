@@ -13,7 +13,7 @@ export const snapshot = Command.make("snapshot", {
   dir: dirArg,
   output: outputFlag,
 }).pipe(
-  Command.withDescription("Concatenate .md files with === path === delimiters"),
+  Command.withDescription("Create a single-file snapshot of a markdown directory"),
   Command.withHandler(({ dir, output }) =>
     Effect.gen(function* () {
       const vault = yield* VaultService;

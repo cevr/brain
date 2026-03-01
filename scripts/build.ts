@@ -43,6 +43,8 @@ console.log(`Binary built: ${join(binDir, "brain")}`);
 const home = process.env["HOME"] ?? os.homedir();
 const bunBin = join(home, ".bun", "bin", "brain");
 try {
+  // Remove existing symlink before creating new one (TOCTOU is fine here —
+  // worst case the unlink fails and symlinkSync reports the real error)
   try {
     lstatSync(bunBin);
     unlinkSync(bunBin);

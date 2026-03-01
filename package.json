@@ -11,6 +11,8 @@
   "files": [
     "src",
     "scripts",
+    "skills",
+    "starter",
     "tsconfig.json"
   ],
   "type": "module",

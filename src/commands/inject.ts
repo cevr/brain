@@ -33,9 +33,9 @@ export const inject = Command.make("inject").pipe(
       let output = "Brain vault — read relevant files before acting:\n\n";
       output += globalIndex;
 
-      if (projectIndex.length > 0) {
+      if (Option.isSome(projectPath) && projectIndex.length > 0) {
         output += "\n---\n\n";
-        output += `Project vault: ${projectPath.pipe(Option.getOrElse(() => ""))}\n\n`;
+        output += `Project vault: ${projectPath.value}\n\n`;
         output += projectIndex;
       }
 
