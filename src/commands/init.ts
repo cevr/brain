@@ -142,6 +142,9 @@ const wireHooks = Effect.fn("wireHooks")(function* (
     try: () => JSON.parse(existing) as Record<string, unknown>,
     catch: () => new ConfigError({ message: "Cannot parse settings.json" }),
   });
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return yield* new ConfigError({ message: "settings.json is not a JSON object" });
+  }
 
   // Validate hooks is a plain object before using it
   const rawHooks = parsed["hooks"];
