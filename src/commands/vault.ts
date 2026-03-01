@@ -1,6 +1,7 @@
 import { Command, Flag } from "effect/unstable/cli";
 import { Console, Effect, Option } from "effect";
 import { ConfigService } from "../services/Config.js";
+import { BrainError } from "../errors/index.js";
 
 const projectFlag = Flag.boolean("project").pipe(
   Flag.withAlias("p"),
@@ -44,7 +45,7 @@ export const vault = Command.make("vault", {
         if (Option.isSome(p)) {
           yield* Console.log(p.value);
         } else {
-          yield* Console.error("No project vault found");
+          return yield* new BrainError({ message: "No project vault found" });
         }
       } else {
         yield* Console.log(yield* config.activeVaultPath());
