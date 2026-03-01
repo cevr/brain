@@ -75,43 +75,32 @@ export class ConfigService extends ServiceMap.Service<
       });
 
       const projectVaultPath = Effect.fn("ConfigService.projectVaultPath")(function* () {
-        const explicit = process.env["BRAIN_PROJECT_DIR"];
-        if (explicit !== undefined) {
-          const exists = yield* fs
-            .exists(explicit)
+        const checkIndex = (dir: string) =>
+          fs
+            .exists(path.join(dir, "index.md"))
             .pipe(
               Effect.mapError(
                 (e: PlatformError) =>
                   new ConfigError({ message: `Cannot check project vault: ${e.message}` }),
               ),
             );
+
+        const explicit = process.env["BRAIN_PROJECT_DIR"];
+        if (explicit !== undefined) {
+          const exists = yield* checkIndex(explicit);
           return exists ? Option.some(explicit) : Option.none<string>();
         }
 
         const claudeDir = process.env["CLAUDE_PROJECT_DIR"];
         if (claudeDir !== undefined) {
           const brainDir = path.join(claudeDir, "brain");
-          const exists = yield* fs
-            .exists(brainDir)
-            .pipe(
-              Effect.mapError(
-                (e: PlatformError) =>
-                  new ConfigError({ message: `Cannot check project vault: ${e.message}` }),
-              ),
-            );
+          const exists = yield* checkIndex(brainDir);
           return exists ? Option.some(brainDir) : Option.none<string>();
         }
 
         const cwd = process.cwd();
         const cwdBrain = path.join(cwd, "brain");
-        const exists = yield* fs
-          .exists(cwdBrain)
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new ConfigError({ message: `Cannot check project vault: ${e.message}` }),
-            ),
-          );
+        const exists = yield* checkIndex(cwdBrain);
         return exists ? Option.some(cwdBrain) : Option.none<string>();
       });
 
