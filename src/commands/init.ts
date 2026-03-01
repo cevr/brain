@@ -258,7 +258,7 @@ const installSkills = Effect.fn("installSkills")(function* (
   path: Path,
   force: boolean,
 ) {
-  const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "/tmp";
 
   // REPO_ROOT injected at compile time by scripts/build.ts
   const sourceDir = path.join(REPO_ROOT, "skills");

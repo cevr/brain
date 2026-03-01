@@ -21,7 +21,7 @@ export const snapshot = Command.make("snapshot", {
       const result = yield* vault.snapshot(dir, output);
 
       if (Option.isSome(output)) {
-        yield* Console.error(result);
+        yield* Console.error(`Wrote snapshot to ${result}`);
       } else {
         yield* Console.log(result);
       }
