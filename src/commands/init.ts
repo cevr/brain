@@ -301,7 +301,22 @@ const installSkills = Effect.fn("installSkills")(function* (
   const installed: string[] = [];
   const conflicts: string[] = [];
 
-  for (const skill of sourceEntries) {
+  // Filter to directories only (skip .DS_Store, README.md, etc.)
+  const skills: string[] = [];
+  for (const entry of sourceEntries) {
+    const stat = yield* fs
+      .stat(path.join(sourceDir, entry))
+      .pipe(
+        Effect.mapError(
+          (e: PlatformError) => new ConfigError({ message: `Cannot stat ${entry}: ${e.message}` }),
+        ),
+      );
+    if (stat.type === "Directory") {
+      skills.push(entry);
+    }
+  }
+
+  for (const skill of skills) {
     const targetSkillDir = path.join(targetDir, skill);
     const exists = yield* fs
       .exists(targetSkillDir)
@@ -325,63 +340,66 @@ const installSkills = Effect.fn("installSkills")(function* (
   return { installed, conflicts, target: targetDir };
 });
 
-function copyDir(
+const copyDir: (
   fs: FileSystem,
   p: Path,
   src: string,
   dest: string,
-): Effect.Effect<void, ConfigError> {
-  return Effect.gen(function* () {
-    yield* fs
-      .makeDirectory(dest, { recursive: true })
+) => Effect.Effect<void, ConfigError> = Effect.fn("copyDir")(function* (
+  fs: FileSystem,
+  p: Path,
+  src: string,
+  dest: string,
+) {
+  yield* fs
+    .makeDirectory(dest, { recursive: true })
+    .pipe(
+      Effect.mapError(
+        (e: PlatformError) => new ConfigError({ message: `Cannot create ${dest}: ${e.message}` }),
+      ),
+    );
+
+  const entries = yield* fs
+    .readDirectory(src)
+    .pipe(
+      Effect.mapError(
+        (e: PlatformError) => new ConfigError({ message: `Cannot read ${src}: ${e.message}` }),
+      ),
+    );
+
+  for (const entry of entries) {
+    const srcPath = p.join(src, entry);
+    const destPath = p.join(dest, entry);
+
+    const stat = yield* fs
+      .stat(srcPath)
       .pipe(
         Effect.mapError(
-          (e: PlatformError) => new ConfigError({ message: `Cannot create ${dest}: ${e.message}` }),
+          (e: PlatformError) =>
+            new ConfigError({ message: `Cannot stat ${srcPath}: ${e.message}` }),
         ),
       );
 
-    const entries = yield* fs
-      .readDirectory(src)
-      .pipe(
-        Effect.mapError(
-          (e: PlatformError) => new ConfigError({ message: `Cannot read ${src}: ${e.message}` }),
-        ),
-      );
-
-    for (const entry of entries) {
-      const srcPath = p.join(src, entry);
-      const destPath = p.join(dest, entry);
-
-      const stat = yield* fs
-        .stat(srcPath)
+    if (stat.type === "Directory") {
+      yield* copyDir(fs, p, srcPath, destPath);
+    } else {
+      // Binary-safe: use readFile/writeFile instead of readFileString/writeFileString
+      const content = yield* fs
+        .readFile(srcPath)
         .pipe(
           Effect.mapError(
             (e: PlatformError) =>
-              new ConfigError({ message: `Cannot stat ${srcPath}: ${e.message}` }),
+              new ConfigError({ message: `Cannot read ${srcPath}: ${e.message}` }),
           ),
         );
-
-      if (stat.type === "Directory") {
-        yield* copyDir(fs, p, srcPath, destPath);
-      } else {
-        // Binary-safe: use readFile/writeFile instead of readFileString/writeFileString
-        const content = yield* fs
-          .readFile(srcPath)
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new ConfigError({ message: `Cannot read ${srcPath}: ${e.message}` }),
-            ),
-          );
-        yield* fs
-          .writeFile(destPath, content)
-          .pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new ConfigError({ message: `Cannot write ${destPath}: ${e.message}` }),
-            ),
-          );
-      }
+      yield* fs
+        .writeFile(destPath, content)
+        .pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new ConfigError({ message: `Cannot write ${destPath}: ${e.message}` }),
+          ),
+        );
     }
-  });
-}
+  }
+});
