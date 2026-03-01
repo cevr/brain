@@ -84,6 +84,9 @@ export const extract = Command.make("extract", {
             ),
           );
 
+        // Skip directories (e.g. foo.jsonl/)
+        if (stat.type !== "File") continue;
+
         // Skip small files (< 500 bytes)
         if ((stat.size ?? 0) < 500) continue;
 
@@ -116,7 +119,7 @@ export const extract = Command.make("extract", {
           if (msgType !== "user" && msgType !== "assistant") continue;
 
           // Skip meta messages (tool results, etc.)
-          if (parsed["isMeta"] === true) continue;
+          if (parsed["isMeta"] === true || parsed["subType"] !== undefined) continue;
 
           // Content is nested under message
           const msg = parsed["message"];
@@ -158,7 +161,7 @@ export const extract = Command.make("extract", {
 
         if (messages.length < 2) continue;
 
-        const uuid = file.replace(".jsonl", "");
+        const uuid = file.endsWith(".jsonl") ? file.slice(0, -6) : file;
         conversations.push({ uuid, messages, modifiedAt: mtime });
       }
 
