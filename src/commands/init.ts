@@ -22,6 +22,10 @@ const noSkillsFlag = Flag.boolean("no-skills").pipe(
 const forceSkillsFlag = Flag.boolean("force-skills").pipe(
   Flag.withDescription("Overwrite existing skills"),
 );
+const verboseFlag = Flag.boolean("verbose").pipe(
+  Flag.withAlias("v"),
+  Flag.withDescription("Print each file created, hook wired, skill installed to stderr"),
+);
 
 export const init = Command.make("init", {
   project: projectFlag,
@@ -29,9 +33,10 @@ export const init = Command.make("init", {
   json: jsonFlag,
   noSkills: noSkillsFlag,
   forceSkills: forceSkillsFlag,
+  verbose: verboseFlag,
 }).pipe(
   Command.withDescription("Initialize a brain vault"),
-  Command.withHandler(({ project, global, json, noSkills, forceSkills }) =>
+  Command.withHandler(({ project, global, json, noSkills, forceSkills, verbose }) =>
     Effect.gen(function* () {
       const config = yield* ConfigService;
       const vault = yield* VaultService;
@@ -124,7 +129,10 @@ export const init = Command.make("init", {
         }
         const somethingChanged =
           created.length > 0 || !cfgExists || hooksChanged || skillResult.installed.length > 0;
-        if (skillResult.conflicts.length > 0 && somethingChanged) {
+        if (!somethingChanged && verbose) {
+          yield* Console.error("Already initialized — nothing to do");
+        }
+        if (skillResult.conflicts.length > 0 && (somethingChanged || verbose)) {
           yield* Console.error(`Skipped (already exist):`);
           for (const s of skillResult.conflicts) {
             yield* Console.error(`  ${s} — use brain init --force-skills to override`);

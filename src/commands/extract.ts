@@ -26,6 +26,14 @@ const toFlag = Flag.string("to").pipe(
   Flag.withDescription("Include conversations modified on or before this date (YYYY-MM-DD)"),
 );
 const jsonFlag = Flag.boolean("json").pipe(Flag.withDescription("Output as JSON"));
+const minSizeFlag = Flag.integer("min-size").pipe(
+  Flag.withDefault(500),
+  Flag.withDescription("Minimum file size in bytes to process (default: 500)"),
+);
+const verboseFlag = Flag.boolean("verbose").pipe(
+  Flag.withAlias("v"),
+  Flag.withDescription("Print per-conversation details to stderr"),
+);
 
 interface Message {
   readonly role: string;
@@ -42,7 +50,12 @@ interface Conversation {
 export const extractConversations = Effect.fn("extractConversations")(function* (
   inputDir: string,
   outputDir: string,
-  opts: { batches?: number; from?: Option.Option<string>; to?: Option.Option<string> } = {},
+  opts: {
+    batches?: number;
+    from?: Option.Option<string>;
+    to?: Option.Option<string>;
+    minSize?: number;
+  } = {},
 ) {
   const fs = yield* FileSystem;
   const path = yield* Path;
@@ -91,8 +104,8 @@ export const extractConversations = Effect.fn("extractConversations")(function* 
     // Skip directories (e.g. foo.jsonl/)
     if (stat.type !== "File") continue;
 
-    // Skip small files (< 500 bytes)
-    if ((stat.size ?? 0) < 500) continue;
+    // Skip small files
+    if ((stat.size ?? 0) < (opts.minSize ?? 500)) continue;
 
     const mtime = stat.mtime ?? new Date(0);
     const mtimeMs = mtime.getTime();
@@ -252,32 +265,44 @@ export const extract = Command.make("extract", {
   from: fromFlag,
   to: toFlag,
   json: jsonFlag,
+  minSize: minSizeFlag,
+  verbose: verboseFlag,
 }).pipe(
   Command.withDescription("Extract conversations for ruminate"),
-  Command.withHandler(({ dir, output, batches, from: fromDate, to: toDate, json }) =>
-    Effect.gen(function* () {
-      const result = yield* extractConversations(dir, output, {
-        batches,
-        from: fromDate,
-        to: toDate,
-      });
+  Command.withHandler(
+    ({ dir, output, batches, from: fromDate, to: toDate, json, minSize, verbose }) =>
+      Effect.gen(function* () {
+        const result = yield* extractConversations(dir, output, {
+          batches,
+          from: fromDate,
+          to: toDate,
+          minSize,
+        });
 
-      if (json) {
-        // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
-        yield* Console.log(
-          JSON.stringify({
-            conversations: result.conversations.length,
-            batches: result.batchPaths,
-            output,
-          }),
-        );
-      } else {
-        yield* Console.error(`Extracted ${result.conversations.length} conversations`);
-        for (const bp of result.batchPaths) {
-          yield* Console.log(bp);
+        if (verbose) {
+          for (const conv of result.conversations) {
+            yield* Console.error(
+              `  ${conv.uuid}: ${conv.messages.length} msgs, modified ${conv.modifiedAt.toISOString().slice(0, 10)}`,
+            );
+          }
         }
-      }
-    }),
+
+        if (json) {
+          // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
+          yield* Console.log(
+            JSON.stringify({
+              conversations: result.conversations.length,
+              batches: result.batchPaths,
+              output,
+            }),
+          );
+        } else {
+          yield* Console.error(`Extracted ${result.conversations.length} conversations`);
+          for (const bp of result.batchPaths) {
+            yield* Console.log(bp);
+          }
+        }
+      }),
   ),
 );
 

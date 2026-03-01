@@ -9,13 +9,18 @@ const allFlag = Flag.boolean("all").pipe(
   Flag.withDescription("Reindex all vaults (global + project)"),
 );
 const jsonFlag = Flag.boolean("json").pipe(Flag.withDescription("Output as JSON"));
+const verboseFlag = Flag.boolean("verbose").pipe(
+  Flag.withAlias("v"),
+  Flag.withDescription("Print each file found to stderr"),
+);
 
 export const reindex = Command.make("reindex", {
   all: allFlag,
   json: jsonFlag,
+  verbose: verboseFlag,
 }).pipe(
   Command.withDescription("Rebuild vault index"),
-  Command.withHandler(({ all, json }) =>
+  Command.withHandler(({ all, json, verbose }) =>
     Effect.gen(function* () {
       const config = yield* ConfigService;
       const vault = yield* VaultService;
@@ -47,6 +52,12 @@ export const reindex = Command.make("reindex", {
             return Effect.fail(e);
           }),
         );
+
+        if (verbose) {
+          for (const [section, count] of Object.entries(result.sections)) {
+            yield* Console.error(`  ${section}: ${count} files`);
+          }
+        }
 
         if (json) {
           // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
