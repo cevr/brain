@@ -1,4 +1,4 @@
-import { Console, Effect, Layer, Option, Schema, ServiceMap } from "effect";
+import { Config, ConfigProvider, Console, Effect, Layer, Option, Schema, ServiceMap } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
@@ -20,6 +20,7 @@ export class ConfigService extends ServiceMap.Service<
     readonly globalVaultPath: () => Effect.Effect<string, ConfigError>;
     readonly projectVaultPath: () => Effect.Effect<Option.Option<string>, ConfigError>;
     readonly activeVaultPath: () => Effect.Effect<string, ConfigError>;
+    readonly currentProjectName: () => Effect.Effect<Option.Option<string>, ConfigError>;
     readonly configFilePath: () => Effect.Effect<string, ConfigError>;
     readonly claudeSettingsPath: () => Effect.Effect<string, ConfigError>;
     readonly loadConfigFile: () => Effect.Effect<ConfigFile, ConfigError>;
@@ -150,10 +151,55 @@ export class ConfigService extends ServiceMap.Service<
         );
       });
 
+      const currentProjectName = Effect.fn("ConfigService.currentProjectName")(function* () {
+        // 1. Env override
+        const envProject = yield* Config.option(Config.string("BRAIN_PROJECT"))
+          .parse(ConfigProvider.fromEnv())
+          .pipe(
+            Effect.mapError(
+              () =>
+                new ConfigError({
+                  message: "Cannot read BRAIN_PROJECT config",
+                  code: "READ_FAILED",
+                }),
+            ),
+          );
+        if (Option.isSome(envProject) && envProject.value.trim() !== "") {
+          return Option.some(envProject.value.trim());
+        }
+
+        // 2. Git root basename
+        const gitRoot = yield* Effect.try({
+          try: () => {
+            const proc = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
+              stderr: "ignore",
+            });
+            if (!proc.success) return Option.none<string>();
+            const trimmed = new TextDecoder().decode(proc.stdout).trim();
+            return trimmed.length > 0 ? Option.some(trimmed) : Option.none<string>();
+          },
+          catch: () => new ConfigError({ message: "git detection failed", code: "READ_FAILED" }),
+        }).pipe(Effect.catch(() => Effect.succeed(Option.none<string>())));
+
+        if (Option.isSome(gitRoot)) {
+          const name = path.basename(gitRoot.value);
+          if (name.length > 0) return Option.some(name);
+        }
+
+        // 3. CWD basename
+        const cwdName = path.basename(process.cwd());
+        if (cwdName.length > 0 && cwdName !== "/") {
+          return Option.some(cwdName);
+        }
+
+        return Option.none<string>();
+      });
+
       return {
         globalVaultPath,
         projectVaultPath,
         activeVaultPath,
+        currentProjectName,
         configFilePath: resolveConfigFilePath,
         claudeSettingsPath,
         loadConfigFile,

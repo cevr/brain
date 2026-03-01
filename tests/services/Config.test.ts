@@ -193,4 +193,50 @@ describe("ConfigService", () => {
         );
     });
   });
+
+  describe("currentProjectName", () => {
+    it.live("returns BRAIN_PROJECT env when set", () => {
+      const original = process.env["BRAIN_PROJECT"];
+      process.env["BRAIN_PROJECT"] = "myapp";
+      return Effect.gen(function* () {
+        const config = yield* ConfigService;
+        const result = yield* config.currentProjectName();
+        expect(Option.isSome(result)).toBe(true);
+        if (Option.isSome(result)) {
+          expect(result.value).toBe("myapp");
+        }
+      })
+        .pipe(Effect.provide(makeTestLayer()))
+        .pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (original === undefined) delete process.env["BRAIN_PROJECT"];
+              else process.env["BRAIN_PROJECT"] = original;
+            }),
+          ),
+        );
+    });
+
+    it.live("falls back to git root basename", () => {
+      const original = process.env["BRAIN_PROJECT"];
+      delete process.env["BRAIN_PROJECT"];
+      return Effect.gen(function* () {
+        const config = yield* ConfigService;
+        const result = yield* config.currentProjectName();
+        // We're running inside the brain repo, so git root basename should be "brain"
+        expect(Option.isSome(result)).toBe(true);
+        if (Option.isSome(result)) {
+          expect(result.value).toBe("brain");
+        }
+      })
+        .pipe(Effect.provide(makeTestLayer()))
+        .pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (original !== undefined) process.env["BRAIN_PROJECT"] = original;
+            }),
+          ),
+        );
+    });
+  });
 });

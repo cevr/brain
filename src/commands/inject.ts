@@ -1,5 +1,7 @@
 import { Command, Flag } from "effect/unstable/cli";
 import { Console, Effect, Option } from "effect";
+import { FileSystem } from "effect/FileSystem";
+import { Path } from "effect/Path";
 import { ConfigService } from "../services/Config.js";
 import { VaultService } from "../services/Vault.js";
 
@@ -11,6 +13,8 @@ export const inject = Command.make("inject", { json: jsonFlag }).pipe(
     Effect.gen(function* () {
       const config = yield* ConfigService;
       const vault = yield* VaultService;
+      const fs = yield* FileSystem;
+      const path = yield* Path;
 
       const [globalPath, projectPath] = yield* Effect.all([
         config.globalVaultPath(),
@@ -37,13 +41,38 @@ export const inject = Command.make("inject", { json: jsonFlag }).pipe(
       // Both empty means no vault — already warned to stderr, exit cleanly
       if (globalIndex.length === 0 && projectIndex.length === 0) return;
 
+      // Detect project-specific notes in global vault's projects/<name>/
+      const projectName = yield* config.currentProjectName();
+      let projectNotes = "";
+      let detectedProject: string | null = null;
+      if (Option.isSome(projectName)) {
+        const projectDir = path.join(globalPath, "projects", projectName.value);
+        const dirExists = yield* fs
+          .exists(projectDir)
+          .pipe(Effect.catch(() => Effect.succeed(false)));
+        if (dirExists) {
+          const files = yield* vault
+            .listFiles(projectDir)
+            .pipe(Effect.catch(() => Effect.succeed([] as string[])));
+          if (files.length > 0) {
+            detectedProject = projectName.value;
+            projectNotes = files.map((f) => `- [[projects/${projectName.value}/${f}]]`).join("\n");
+          }
+        }
+      }
+
       if (json) {
         // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
         yield* Console.log(
           JSON.stringify({
             global: globalIndex,
             project: Option.isSome(projectPath) && projectIndex.length > 0 ? projectIndex : null,
-            index: globalIndex + (projectIndex.length > 0 ? "\n" + projectIndex : ""),
+            projectName: detectedProject,
+            projectNotes: projectNotes.length > 0 ? projectNotes : null,
+            index:
+              globalIndex +
+              (projectNotes.length > 0 ? "\n" + projectNotes : "") +
+              (projectIndex.length > 0 ? "\n" + projectIndex : ""),
           }),
         );
         return;
@@ -51,6 +80,10 @@ export const inject = Command.make("inject", { json: jsonFlag }).pipe(
 
       let output = "Brain vault — read relevant files before acting:\n\n";
       output += globalIndex;
+
+      if (projectNotes.length > 0) {
+        output += `\n## Project: ${detectedProject}\n${projectNotes}\n`;
+      }
 
       if (Option.isSome(projectPath) && projectIndex.length > 0) {
         output += "\n---\n\n";

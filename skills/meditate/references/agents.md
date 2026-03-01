@@ -59,7 +59,7 @@ Do NOT propose merging principles — they are intentionally independent. Propos
 
 ## 2. Distillation
 Identify unstated principles evidenced by 2+ existing notes.
-Focus on codebase/ notes — they often contain implicit principles.
+Focus on project-specific notes (e.g. `bite/`, `cli/`) — they often contain implicit principles.
 
 Each proposed principle must be:
 - **Independent** — not a restatement of an existing principle

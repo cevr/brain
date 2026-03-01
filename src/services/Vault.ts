@@ -23,7 +23,7 @@ interface ReindexResult {
   readonly changed: boolean;
 }
 
-const VAULT_DIRS = ["principles", "plans", "codebase"] as const;
+const VAULT_DIRS = ["principles", "plans", "projects"] as const;
 
 // Seed files that have their own curated indexes — exclude from auto-index "Other" section
 const VAULT_SEED_FILES = new Set(["principles"]);
@@ -63,7 +63,10 @@ function extractSections(files: string[]): Record<string, number> {
 export class VaultService extends ServiceMap.Service<
   VaultService,
   {
-    readonly init: (vaultPath: string) => Effect.Effect<string[], VaultError>;
+    readonly init: (
+      vaultPath: string,
+      options?: { readonly minimal?: boolean },
+    ) => Effect.Effect<string[], VaultError>;
     readonly rebuildIndex: (vaultPath: string) => Effect.Effect<ReindexResult, VaultError>;
     readonly readIndex: (vaultPath: string) => Effect.Effect<string, VaultError>;
     readonly listFiles: (vaultPath: string) => Effect.Effect<string[], VaultError>;
@@ -96,8 +99,12 @@ export class VaultService extends ServiceMap.Service<
           .sort();
       });
 
-      const init = Effect.fn("VaultService.init")(function* (vaultPath: string) {
+      const init = Effect.fn("VaultService.init")(function* (
+        vaultPath: string,
+        options?: { readonly minimal?: boolean },
+      ) {
         const created: string[] = [];
+        const minimal = options?.minimal === true;
 
         yield* fs.makeDirectory(vaultPath, { recursive: true }).pipe(
           Effect.mapError(
@@ -110,20 +117,26 @@ export class VaultService extends ServiceMap.Service<
           ),
         );
 
-        for (const dir of VAULT_DIRS) {
-          yield* fs.makeDirectory(path.join(vaultPath, dir), { recursive: true }).pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new VaultError({
-                  message: `Cannot create ${dir}: ${e.message}`,
-                  code: "WRITE_FAILED",
-                  path: vaultPath,
-                }),
-            ),
-          );
+        if (!minimal) {
+          for (const dir of VAULT_DIRS) {
+            yield* fs.makeDirectory(path.join(vaultPath, dir), { recursive: true }).pipe(
+              Effect.mapError(
+                (e: PlatformError) =>
+                  new VaultError({
+                    message: `Cannot create ${dir}: ${e.message}`,
+                    code: "WRITE_FAILED",
+                    path: vaultPath,
+                  }),
+              ),
+            );
+          }
         }
 
-        for (const [filePath, content] of Object.entries(VAULT_FILES)) {
+        const filesToCreate = minimal
+          ? { "index.md": VAULT_FILES["index.md"] ?? "# Brain\n" }
+          : VAULT_FILES;
+
+        for (const [filePath, content] of Object.entries(filesToCreate)) {
           const fullPath = path.join(vaultPath, filePath);
           const exists = yield* fs.exists(fullPath).pipe(
             Effect.mapError(

@@ -46,6 +46,7 @@ const makeTestConfig = (globalVault: string, projectVault: Option.Option<string>
     projectVaultPath: () => Effect.succeed(projectVault),
     activeVaultPath: () =>
       Effect.succeed(Option.isSome(projectVault) ? projectVault.value : globalVault),
+    currentProjectName: () => Effect.succeed(Option.none()),
     configFilePath: () => Effect.succeed("/tmp/config.json"),
     claudeSettingsPath: () => Effect.succeed("/tmp/settings.json"),
     loadConfigFile: () => Effect.succeed({}),

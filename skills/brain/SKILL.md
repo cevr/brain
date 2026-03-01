@@ -42,13 +42,14 @@ What do you need?
 ├── index.md                 # auto-maintained root index (wikilinks by section)
 ├── principles.md            # categorized principle index
 ├── principles/              # one file per engineering principle
-├── codebase/                # project-specific knowledge and gotchas
 ├── plans/
 │   └── index.md             # plan index
-└── projects/                # optional per-project namespaces
+└── projects/                # per-project namespaces (auto-detected by git root / cwd)
+    ├── bite/                # e.g. project-specific notes for the bite repo
+    └── brain/               # e.g. project-specific notes for this repo
 ```
 
-**Multi-vault**: global (`~/.brain/`) always active. Project vault (`$PWD/brain/` or `$CLAUDE_PROJECT_DIR/brain/`) layered on top when present. `brain init --project` creates one.
+**Multi-vault**: global (`~/.brain/`) always active. `brain inject` auto-detects the current project (via `BRAIN_PROJECT` env, git root basename, or cwd basename) and injects notes from `projects/<name>/` alongside the global index. Project vault (`$PWD/brain/` or `$CLAUDE_PROJECT_DIR/brain/`) layered on top when present. `brain init --project --global` creates a minimal project namespace under the global vault.
 
 **Hooks**: `SessionStart` runs `brain inject`. `PostToolUse` (matcher: `brain/`) runs `brain reindex`.
 

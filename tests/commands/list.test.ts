@@ -17,12 +17,13 @@ describe("list", () => {
 
         yield* vault.init(dir);
         yield* fs.writeFileString(`${dir}/principles/testing.md`, "# Testing\n");
-        yield* fs.writeFileString(`${dir}/codebase/api.md`, "# API\n");
+        yield* fs.makeDirectory(`${dir}/projects/myapp`, { recursive: true });
+        yield* fs.writeFileString(`${dir}/projects/myapp/api.md`, "# API\n");
 
         const files = yield* vault.listFiles(dir);
 
         expect(files).toContain("principles/testing");
-        expect(files).toContain("codebase/api");
+        expect(files).toContain("projects/myapp/api");
         // principles.md seed file should also be listed
         expect(files).toContain("principles");
       }),

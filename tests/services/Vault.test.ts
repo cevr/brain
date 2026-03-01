@@ -24,7 +24,7 @@ describe("VaultService", () => {
 
           expect(yield* fs.exists(`${dir}/principles`)).toBe(true);
           expect(yield* fs.exists(`${dir}/plans`)).toBe(true);
-          expect(yield* fs.exists(`${dir}/codebase`)).toBe(true);
+          expect(yield* fs.exists(`${dir}/projects`)).toBe(true);
           expect(yield* fs.exists(`${dir}/index.md`)).toBe(true);
           expect(yield* fs.exists(`${dir}/principles.md`)).toBe(true);
 
@@ -43,6 +43,24 @@ describe("VaultService", () => {
           const second = yield* vault.init(dir);
 
           expect(second).toEqual([]);
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("minimal mode creates only dir and index.md", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const vault = yield* VaultService;
+          const fs = yield* FileSystem;
+
+          const created = yield* vault.init(dir, { minimal: true });
+
+          expect(created).toEqual(["index.md"]);
+          expect(yield* fs.exists(`${dir}/index.md`)).toBe(true);
+          expect(yield* fs.exists(`${dir}/principles`)).toBe(false);
+          expect(yield* fs.exists(`${dir}/plans`)).toBe(false);
+          expect(yield* fs.exists(`${dir}/projects`)).toBe(false);
+          expect(yield* fs.exists(`${dir}/principles.md`)).toBe(false);
         }),
       ).pipe(Effect.provide(TestLayer)),
     );

@@ -37,7 +37,7 @@ Mine the current conversation for brain-worthy knowledge.
    | Destination | When |
    |-------------|------|
    | `$(brain vault)/principles/` | General engineering principle |
-   | `$(brain vault)/codebase/` | Project-specific knowledge, tool quirks |
+   | `$(brain vault)/projects/<project-name>/` | Project-specific knowledge (auto-detected by git root / cwd) |
    | `$(brain vault)/` root | Cross-cutting knowledge |
 
    **Skill improvements**: update `~/.claude/skills/<skill>/` directly if the learning is about a skill's own process.

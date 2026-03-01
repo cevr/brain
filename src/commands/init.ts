@@ -72,10 +72,13 @@ export const init = Command.make("init", {
         vaultPath = yield* config.globalVaultPath();
       }
 
-      const created = yield* vault.init(vaultPath);
+      const isProjectSubVault = project && global;
+      const created = yield* vault.init(vaultPath, { minimal: isProjectSubVault });
 
-      // Copy starter principles if principles/ is empty
-      yield* copyStarterPrinciples(fs, path, vaultPath);
+      // Copy starter principles if principles/ is empty (skip for project sub-vaults)
+      if (!isProjectSubVault) {
+        yield* copyStarterPrinciples(fs, path, vaultPath);
+      }
 
       const cfgPath = yield* config.configFilePath();
       const cfgExists = yield* fs.exists(cfgPath).pipe(

@@ -18,16 +18,17 @@ describe("status", () => {
 
         yield* vault.init(dir);
         yield* fs.writeFileString(`${dir}/principles/testing.md`, "# Testing\n");
-        yield* fs.writeFileString(`${dir}/codebase/api.md`, "# API\n");
+        yield* fs.makeDirectory(`${dir}/projects/myapp`, { recursive: true });
+        yield* fs.writeFileString(`${dir}/projects/myapp/api.md`, "# API\n");
         yield* vault.rebuildIndex(dir);
 
         const result = yield* vault.status(dir);
 
         expect(result.vault).toBe(dir);
-        // principles.md (seed) + principles/testing + codebase/api = 3
+        // principles.md (seed) + principles/testing + projects/myapp/api = 3
         expect(result.files).toBe(3);
         expect(result.sections["principles"]).toBe(1);
-        expect(result.sections["codebase"]).toBe(1);
+        expect(result.sections["projects"]).toBe(1);
         // principles.md seed file → "other" section
         expect(result.sections["other"]).toBe(1);
         expect(result.orphans).toHaveLength(0);

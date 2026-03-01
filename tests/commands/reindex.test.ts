@@ -17,18 +17,19 @@ describe("reindex", () => {
 
         yield* vault.init(dir);
         yield* fs.writeFileString(`${dir}/principles/testing.md`, "# Testing\n");
-        yield* fs.writeFileString(`${dir}/codebase/api-notes.md`, "# API\n");
+        yield* fs.makeDirectory(`${dir}/projects/myapp`, { recursive: true });
+        yield* fs.writeFileString(`${dir}/projects/myapp/api-notes.md`, "# API\n");
 
         const result = yield* vault.rebuildIndex(dir);
 
         expect(result.changed).toBe(true);
         expect(result.files).toBeGreaterThanOrEqual(2);
         expect(result.sections).toHaveProperty("principles");
-        expect(result.sections).toHaveProperty("codebase");
+        expect(result.sections).toHaveProperty("projects");
 
         const content = yield* fs.readFileString(`${dir}/index.md`);
         expect(content).toContain("[[principles/testing]]");
-        expect(content).toContain("[[codebase/api-notes]]");
+        expect(content).toContain("[[projects/myapp/api-notes]]");
       }),
     ).pipe(Effect.provide(TestLayer)),
   );
