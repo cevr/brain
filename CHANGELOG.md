@@ -1,5 +1,11 @@
 # @cvr/brain
 
+## 0.3.0
+
+### Minor Changes
+
+- [`c687904`](https://github.com/cevr/brain/commit/c68790495c24e8c2647510011f155d36a0f5fa15) Thanks [@cevr](https://github.com/cevr)! - Add project-namespaced vault directories with auto-detection. `brain inject` now detects the current project (via `BRAIN_PROJECT` env, git root basename, or cwd basename) and injects notes from `projects/<name>/` alongside the global index. `brain init --project --global` creates minimal sub-vaults. New `ConfigService.currentProjectName()` method.
+
 ## 0.2.0
 
 ### Minor Changes
