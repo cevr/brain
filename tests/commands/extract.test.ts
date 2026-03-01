@@ -6,15 +6,9 @@ import { Path } from "effect/Path";
 import { BunServices } from "@effect/platform-bun";
 import { utimesSync } from "node:fs";
 import { extractConversations } from "../../src/commands/extract.js";
+import { withTempDir } from "../helpers/index.js";
 
 const TestLayer = BunServices.layer;
-
-const withTempDir = <A, E>(fn: (dir: string) => Effect.Effect<A, E, FileSystem | Path>) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    return yield* fn(dir);
-  }).pipe(Effect.scoped);
 
 // Helper: create a JSONL file with lines
 const writeJsonl = (fs: FileSystem, filePath: string, lines: Record<string, unknown>[]) =>

@@ -4,15 +4,9 @@ import { Effect, Layer, Option } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { BunServices } from "@effect/platform-bun";
 import { VaultService } from "../../src/services/Vault.js";
+import { withTempDir } from "../helpers/index.js";
 
 const TestLayer = VaultService.layer.pipe(Layer.provideMerge(BunServices.layer));
-
-const withTempDir = <A, E>(fn: (dir: string) => Effect.Effect<A, E, VaultService | FileSystem>) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    return yield* fn(dir);
-  }).pipe(Effect.scoped);
 
 describe("VaultService", () => {
   describe("init", () => {

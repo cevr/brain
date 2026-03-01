@@ -6,15 +6,9 @@ import { Path } from "effect/Path";
 import { BunServices } from "@effect/platform-bun";
 import { wireHooks, copyStarterPrinciples } from "../../src/commands/init.js";
 import { ConfigError } from "../../src/errors/index.js";
+import { withTempDir } from "../helpers/index.js";
 
 const TestLayer = BunServices.layer;
-
-const withTempDir = <A, E>(fn: (dir: string) => Effect.Effect<A, E, FileSystem | Path>) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    return yield* fn(dir);
-  }).pipe(Effect.scoped);
 
 const readSettings = (fs: FileSystem, path: string) =>
   fs.readFileString(path).pipe(Effect.map((s) => JSON.parse(s) as Record<string, unknown>));
