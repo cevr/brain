@@ -304,25 +304,31 @@ describe("extract", () => {
       withTempDir((dir) =>
         Effect.gen(function* () {
           const fs = yield* FileSystem;
+          const path = yield* Path;
           const inputDir = `${dir}/input`;
           const outputDir = `${dir}/output`;
           yield* fs.makeDirectory(inputDir, { recursive: true });
 
-          // Write two files — mtime is set by the filesystem
-          yield* writeJsonl(fs, `${inputDir}/old.jsonl`, [
+          const oldFile = path.join(inputDir, "old.jsonl");
+          const newFile = path.join(inputDir, "new.jsonl");
+
+          yield* writeJsonl(fs, oldFile, [
             userMsg("Old conversation user message that is long enough to pass filter"),
             assistantMsg("Old conversation assistant message long enough to pass filter"),
             { type: "padding", message: { content: "x".repeat(500) } },
           ]);
 
-          // Small delay to ensure different mtime
-          yield* Effect.sleep("50 millis");
-
-          yield* writeJsonl(fs, `${inputDir}/new.jsonl`, [
+          yield* writeJsonl(fs, newFile, [
             userMsg("New conversation user message that is long enough to pass filter"),
             assistantMsg("New conversation assistant message long enough to pass filter"),
             { type: "padding", message: { content: "x".repeat(500) } },
           ]);
+
+          // Set explicit mtimes instead of relying on sleep
+          yield* Effect.sync(() => {
+            utimesSync(oldFile, new Date("2024-01-01"), new Date("2024-01-01"));
+            utimesSync(newFile, new Date("2024-06-01"), new Date("2024-06-01"));
+          });
 
           const result = yield* runExtract(inputDir, outputDir);
 
@@ -365,18 +371,21 @@ describe("extract", () => {
       withTempDir((dir) =>
         Effect.gen(function* () {
           const fs = yield* FileSystem;
+          const path = yield* Path;
           const inputDir = `${dir}/input`;
           const outputDir = `${dir}/output`;
           yield* fs.makeDirectory(inputDir, { recursive: true });
 
-          // Create 4 conversations
+          // Create 4 conversations with explicit mtimes
           for (let i = 0; i < 4; i++) {
-            yield* writeJsonl(fs, `${inputDir}/conv${i}.jsonl`, [
+            const file = path.join(inputDir, `conv${i}.jsonl`);
+            yield* writeJsonl(fs, file, [
               userMsg(`User message number ${i} that is long enough to pass the filter`),
               assistantMsg(`Assistant message number ${i} that is long enough to pass filter`),
               { type: "padding", message: { content: "x".repeat(500) } },
             ]);
-            yield* Effect.sleep("10 millis");
+            const date = new Date(`2024-0${i + 1}-01`);
+            utimesSync(file, date, date);
           }
 
           const result = yield* runExtract(inputDir, outputDir, { batches: 2 });
