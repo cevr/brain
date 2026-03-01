@@ -130,14 +130,16 @@ export const init = Command.make("init", {
         }
         const somethingChanged =
           created.length > 0 || !cfgExists || hooksChanged || skillResult.installed.length > 0;
-        if (!somethingChanged && verbose) {
-          yield* Console.error("Already initialized — nothing to do");
-        }
         if (skillResult.conflicts.length > 0 && (somethingChanged || verbose)) {
           yield* Console.error(`Skipped (already exist):`);
           for (const s of skillResult.conflicts) {
             yield* Console.error(`  ${s} — use brain init --force-skills to override`);
           }
+        }
+        if (somethingChanged) {
+          yield* Console.error(`\nDone — vault ready at ${vaultPath}`);
+        } else {
+          yield* Console.error(`Already initialized — vault at ${vaultPath}`);
         }
       }
     }),
