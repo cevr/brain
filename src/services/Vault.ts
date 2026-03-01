@@ -1,8 +1,13 @@
 import { Effect, Layer, Option, ServiceMap } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
-import type { PlatformError } from "effect/PlatformError";
+import { PlatformError } from "effect/PlatformError";
 import { VaultError } from "../errors/index.js";
+
+function isNotFound(e: PlatformError): boolean {
+  const tag = e.reason._tag;
+  return tag === "NotFound" || tag === "BadArgument";
+}
 
 interface VaultStatus {
   readonly vault: string;
@@ -145,9 +150,18 @@ export class VaultService extends ServiceMap.Service<
         // Exclude seed files (e.g. principles.md) that have their own curated indexes
         const disk = allFiles.filter((f) => f.includes("/") || !VAULT_SEED_FILES.has(f));
 
-        const existingContent = yield* fs
-          .readFileString(indexPath)
-          .pipe(Effect.catch(() => Effect.succeed("")));
+        const existingContent = yield* fs.readFileString(indexPath).pipe(
+          Effect.catch((e) =>
+            e instanceof PlatformError && isNotFound(e)
+              ? Effect.succeed("")
+              : Effect.fail(
+                  new VaultError({
+                    message: `Cannot read index: ${(e as PlatformError).message}`,
+                    path: vaultPath,
+                  }),
+                ),
+          ),
+        );
 
         // Strip heading anchors (e.g. [[file#heading]] → file) and deduplicate for comparison
         const indexed = [
@@ -229,9 +243,18 @@ export class VaultService extends ServiceMap.Service<
       const status = Effect.fn("VaultService.status")(function* (vaultPath: string) {
         const files = yield* listMdFiles(vaultPath);
 
-        const indexContent = yield* fs
-          .readFileString(path.join(vaultPath, "index.md"))
-          .pipe(Effect.catch(() => Effect.succeed("")));
+        const indexContent = yield* fs.readFileString(path.join(vaultPath, "index.md")).pipe(
+          Effect.catch((e) =>
+            e instanceof PlatformError && isNotFound(e)
+              ? Effect.succeed("")
+              : Effect.fail(
+                  new VaultError({
+                    message: `Cannot read index: ${(e as PlatformError).message}`,
+                    path: vaultPath,
+                  }),
+                ),
+          ),
+        );
         const indexed = new Set(
           [...indexContent.matchAll(/\[\[([^\]]+)\]\]/g)].map(
             (m) => firstCapture(m).split("#")[0] ?? "",
