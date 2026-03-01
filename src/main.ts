@@ -7,7 +7,7 @@ import { ConfigService } from "./services/Config.js";
 import { VaultService } from "./services/Vault.js";
 
 const cli = Command.run(command, {
-  version: "0.1.0",
+  version: typeof APP_VERSION !== "undefined" ? APP_VERSION : "0.0.0-dev",
 });
 
 const ServiceLayer = Layer.mergeAll(ConfigService.layer, VaultService.layer);

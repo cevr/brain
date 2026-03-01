@@ -12,6 +12,9 @@ console.log("Building brain...");
 const binDir = join(rootDir, "bin");
 mkdirSync(binDir, { recursive: true });
 
+const pkg = await Bun.file(join(rootDir, "package.json")).json();
+const version = (pkg as { version: string }).version;
+
 const platform =
   process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "windows" : "linux";
 const arch = process.arch === "arm64" ? "arm64" : "x64";
@@ -22,6 +25,7 @@ const buildResult = await Bun.build({
   minify: false,
   define: {
     REPO_ROOT: JSON.stringify(rootDir),
+    APP_VERSION: JSON.stringify(version),
   },
   compile: {
     target: `bun-${platform}-${arch}`,
