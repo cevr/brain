@@ -20,6 +20,9 @@ interface ReindexResult {
 
 const VAULT_DIRS = ["principles", "plans", "codebase"] as const;
 
+// Seed files that have their own curated indexes — exclude from auto-index "Other" section
+const VAULT_SEED_FILES = new Set(["principles"]);
+
 const VAULT_FILES: Record<string, string> = {
   "index.md": `# Brain\n`,
   "principles.md": `# Principles\n`,
@@ -138,7 +141,9 @@ export class VaultService extends ServiceMap.Service<
       const rebuildIndex = Effect.fn("VaultService.rebuildIndex")(function* (vaultPath: string) {
         const indexPath = path.join(vaultPath, "index.md");
 
-        const disk = yield* listMdFiles(vaultPath);
+        const allFiles = yield* listMdFiles(vaultPath);
+        // Exclude seed files (e.g. principles.md) that have their own curated indexes
+        const disk = allFiles.filter((f) => f.includes("/") || !VAULT_SEED_FILES.has(f));
 
         const existingContent = yield* fs
           .readFileString(indexPath)
@@ -154,7 +159,7 @@ export class VaultService extends ServiceMap.Service<
         if (diskStr === indexedStr) {
           return {
             vault: vaultPath,
-            files: disk.length,
+            files: allFiles.length,
             sections: extractSections(disk),
             changed: false,
           };
@@ -197,7 +202,7 @@ export class VaultService extends ServiceMap.Service<
 
         return {
           vault: vaultPath,
-          files: disk.length,
+          files: allFiles.length,
           sections: extractSections(disk),
           changed: true,
         };
