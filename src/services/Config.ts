@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Schema, ServiceMap } from "effect";
+import { Console, Effect, Layer, Option, Schema, ServiceMap } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
@@ -57,7 +57,11 @@ export class ConfigService extends ServiceMap.Service<
                 new ConfigError({ message: `Cannot read config: ${e.message}` }),
             ),
           );
-        return yield* decodeConfigFile(text).pipe(Effect.catch(() => Effect.succeed({})));
+        return yield* decodeConfigFile(text).pipe(
+          Effect.catch((e) =>
+            Console.error(`Warning: corrupt config, using defaults: ${e}`).pipe(Effect.as({})),
+          ),
+        );
       });
 
       const globalVaultPath = Effect.fn("ConfigService.globalVaultPath")(function* () {
@@ -98,7 +102,7 @@ export class ConfigService extends ServiceMap.Service<
           return exists ? Option.some(brainDir) : Option.none<string>();
         }
 
-        const cwd = process.env["PWD"] ?? process.cwd();
+        const cwd = process.cwd();
         const cwdBrain = path.join(cwd, "brain");
         const exists = yield* fs
           .exists(cwdBrain)
