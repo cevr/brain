@@ -2,6 +2,7 @@ import { Command, Flag } from "effect/unstable/cli";
 import { Console, Effect, Option } from "effect";
 import { ConfigService } from "../services/Config.js";
 import { VaultService } from "../services/Vault.js";
+import { VaultError } from "../errors/index.js";
 
 const allFlag = Flag.boolean("all").pipe(
   Flag.withAlias("a"),
@@ -33,7 +34,16 @@ export const reindex = Command.make("reindex", {
       }
 
       for (const vaultPath of vaults) {
-        const result = yield* vault.rebuildIndex(vaultPath);
+        const result = yield* vault.rebuildIndex(vaultPath).pipe(
+          Effect.catchTag("VaultError", (e) => {
+            if (e.message.includes("Cannot read vault")) {
+              return Effect.fail(
+                new VaultError({ message: "Vault not initialized — run `brain init`" }),
+              );
+            }
+            return Effect.fail(e);
+          }),
+        );
 
         if (!result.changed) continue;
 

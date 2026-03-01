@@ -16,7 +16,14 @@ export const inject = Command.make("inject").pipe(
       ]);
 
       const readIndexSafe = (p: string) =>
-        vault.readIndex(p).pipe(Effect.catch(() => Effect.succeed("")));
+        vault.readIndex(p).pipe(
+          Effect.catchTag("VaultError", (e) => {
+            if (e.message.includes("Cannot read index")) {
+              return Console.error("Vault not initialized — run `brain init`").pipe(Effect.as(""));
+            }
+            return Effect.succeed("");
+          }),
+        );
 
       // Read indexes concurrently when project vault exists
       const [globalIndex, projectIndex] = Option.isSome(projectPath)
