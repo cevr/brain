@@ -231,13 +231,16 @@ export const wireHooks = Effect.fn("wireHooks")(function* (
   return changed;
 });
 
-const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function* (
+/** @internal */
+export const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function* (
   fs: FileSystem,
   path: Path,
   vaultPath: string,
+  repoRoot?: string,
 ) {
+  const root = repoRoot ?? REPO_ROOT;
   const principlesDir = path.join(vaultPath, "principles");
-  const starterDir = path.join(REPO_ROOT, "starter", "principles");
+  const starterDir = path.join(root, "starter", "principles");
 
   const isNotFound = (e: unknown): boolean =>
     e instanceof PlatformError && (e.reason._tag === "NotFound" || e.reason._tag === "BadArgument");
@@ -305,7 +308,7 @@ const copyStarterPrinciples = Effect.fn("copyStarterPrinciples")(function* (
   }
 
   // Copy principles.md index
-  const indexSrc = path.join(REPO_ROOT, "starter", "principles.md");
+  const indexSrc = path.join(root, "starter", "principles.md");
   const indexSrcExists = yield* fs.exists(indexSrc).pipe(
     Effect.catch((e) =>
       isNotFound(e)

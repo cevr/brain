@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { BunServices } from "@effect/platform-bun";
-import { wireHooks } from "../../src/commands/init.js";
+import { wireHooks, copyStarterPrinciples } from "../../src/commands/init.js";
 
 const TestLayer = BunServices.layer;
 
@@ -138,9 +138,11 @@ describe("starter principles", () => {
     withTempDir((dir) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem;
+        const path = yield* Path;
 
-        // Simulate a starter dir and an empty principles dir
-        const starterDir = `${dir}/starter/principles`;
+        // Set up a fake repo root with starter dir
+        const fakeRoot = `${dir}/repo`;
+        const starterDir = `${fakeRoot}/starter/principles`;
         const vaultDir = `${dir}/vault`;
         const principlesDir = `${vaultDir}/principles`;
 
@@ -149,25 +151,20 @@ describe("starter principles", () => {
 
         yield* fs.writeFileString(`${starterDir}/first.md`, "# First Principle\n");
         yield* fs.writeFileString(`${starterDir}/second.md`, "# Second Principle\n");
+        // Also create principles.md index in starter
+        yield* fs.writeFileString(`${fakeRoot}/starter/principles.md`, "# Principles Index\n");
 
-        // Replicate copyStarterPrinciples logic
-        const starterExists = yield* fs.exists(starterDir);
-        if (starterExists) {
-          const entries = yield* fs.readDirectory(principlesDir);
-          if (entries.length === 0) {
-            const starterFiles = yield* fs.readDirectory(starterDir);
-            for (const file of starterFiles) {
-              const content = yield* fs.readFile(`${starterDir}/${file}`);
-              yield* fs.writeFile(`${principlesDir}/${file}`, content);
-            }
-          }
-        }
+        yield* copyStarterPrinciples(fs, path, vaultDir, fakeRoot);
 
         const copied = yield* fs.readDirectory(principlesDir);
         expect(copied.sort()).toEqual(["first.md", "second.md"]);
 
         const content = yield* fs.readFileString(`${principlesDir}/first.md`);
         expect(content).toBe("# First Principle\n");
+
+        // principles.md index was also copied
+        const indexContent = yield* fs.readFileString(`${vaultDir}/principles.md`);
+        expect(indexContent).toBe("# Principles Index\n");
       }),
     ).pipe(Effect.provide(TestLayer)),
   );
@@ -176,8 +173,10 @@ describe("starter principles", () => {
     withTempDir((dir) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem;
+        const path = yield* Path;
 
-        const starterDir = `${dir}/starter/principles`;
+        const fakeRoot = `${dir}/repo`;
+        const starterDir = `${fakeRoot}/starter/principles`;
         const vaultDir = `${dir}/vault`;
         const principlesDir = `${vaultDir}/principles`;
 
@@ -188,18 +187,7 @@ describe("starter principles", () => {
         // Pre-existing file in principles
         yield* fs.writeFileString(`${principlesDir}/existing.md`, "# Existing\n");
 
-        // Replicate copyStarterPrinciples logic
-        const starterExists = yield* fs.exists(starterDir);
-        if (starterExists) {
-          const entries = yield* fs.readDirectory(principlesDir);
-          if (entries.length === 0) {
-            const starterFiles = yield* fs.readDirectory(starterDir);
-            for (const file of starterFiles) {
-              const content = yield* fs.readFile(`${starterDir}/${file}`);
-              yield* fs.writeFile(`${principlesDir}/${file}`, content);
-            }
-          }
-        }
+        yield* copyStarterPrinciples(fs, path, vaultDir, fakeRoot);
 
         const files = yield* fs.readDirectory(principlesDir);
         expect(files).toEqual(["existing.md"]);
