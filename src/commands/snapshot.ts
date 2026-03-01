@@ -2,7 +2,9 @@ import { Argument, Command, Flag } from "effect/unstable/cli";
 import { Console, Effect, Option } from "effect";
 import { VaultService } from "../services/Vault.js";
 
-const dirArg = Argument.string("dir");
+const dirArg = Argument.string("dir").pipe(
+  Argument.withDescription("Path to markdown directory to snapshot"),
+);
 const outputFlag = Flag.string("output").pipe(
   Flag.optional,
   Flag.withAlias("o"),

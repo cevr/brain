@@ -5,10 +5,12 @@ import { Path } from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import { BrainError } from "../errors/index.js";
 
-const dirArg = Argument.string("dir");
+const dirArg = Argument.string("dir").pipe(
+  Argument.withDescription("Path to JSONL conversation directory"),
+);
 const outputFlag = Flag.string("output").pipe(
   Flag.withAlias("o"),
-  Flag.withDescription("Output directory"),
+  Flag.withDescription("Output directory (required)"),
 );
 const batchesFlag = Flag.integer("batches").pipe(
   Flag.withDefault(3),
