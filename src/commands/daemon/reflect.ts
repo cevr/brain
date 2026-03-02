@@ -120,77 +120,83 @@ export const runReflect = Effect.fn("runReflect")(function* () {
     }
 
     for (const group of groups) {
-      yield* Console.error(
-        `Reflecting on ${group.sessions.length} session(s) from ${group.projectName}...`,
-      );
+      yield* Effect.gen(function* () {
+        yield* Console.error(
+          `Reflecting on ${group.sessions.length} session(s) from ${group.projectName}...`,
+        );
 
-      // Ensure project dir exists in vault
-      const projectDir = path.join(brainDir, "projects", group.projectName);
-      yield* vault.init(projectDir, { minimal: true }).pipe(Effect.catch(() => Effect.void));
+        // Ensure project dir exists in vault
+        const projectDir = path.join(brainDir, "projects", group.projectName);
+        yield* vault.init(projectDir, { minimal: true }).pipe(Effect.catch(() => Effect.void));
 
-      // Extract conversations to a temp dir, then build prompt
-      const tmpDir = yield* fs.makeTempDirectory().pipe(
-        Effect.catch(() =>
-          Effect.gen(function* () {
-            const d = path.join(brainDir, ".daemon-tmp");
-            yield* fs.makeDirectory(d, { recursive: true }).pipe(Effect.catch(() => Effect.void));
-            return d;
-          }),
-        ),
-      );
+        // Extract conversations to a temp dir, then build prompt
+        const tmpDir = yield* fs.makeTempDirectory().pipe(
+          Effect.catch(() =>
+            Effect.gen(function* () {
+              const d = path.join(brainDir, ".daemon-tmp");
+              yield* fs.makeDirectory(d, { recursive: true }).pipe(Effect.catch(() => Effect.void));
+              return d;
+            }),
+          ),
+        );
 
-      const inputDir = path.join(tmpDir, "input");
-      const outputDir = path.join(tmpDir, "output");
-      yield* fs.makeDirectory(inputDir, { recursive: true }).pipe(Effect.catch(() => Effect.void));
+        const inputDir = path.join(tmpDir, "input");
+        const outputDir = path.join(tmpDir, "output");
+        yield* fs
+          .makeDirectory(inputDir, { recursive: true })
+          .pipe(Effect.catch(() => Effect.void));
 
-      // Copy session files into temp input dir
-      for (const session of group.sessions) {
-        const dest = path.join(inputDir, session.name);
-        yield* fs.copyFile(session.path, dest).pipe(Effect.catch(() => Effect.void));
-      }
-
-      const result = yield* extractConversations(inputDir, outputDir, {
-        batches: Math.ceil(group.sessions.length / MAX_SESSIONS_PER_BATCH),
-        minSize: 200,
-      });
-
-      if (result.conversations.length === 0) {
-        yield* Console.error(`  No meaningful conversations found, skipping`);
-      } else {
-        // Build transcript text from written files
-        const transcripts: string[] = [];
-        for (const writtenPath of result.writtenPaths) {
-          const content = yield* fs
-            .readFileString(writtenPath)
-            .pipe(Effect.catch(() => Effect.succeed("")));
-          if (content.length > 0) transcripts.push(content);
+        // Copy session files into temp input dir
+        for (const session of group.sessions) {
+          const dest = path.join(inputDir, session.name);
+          yield* fs.copyFile(session.path, dest).pipe(Effect.catch(() => Effect.void));
         }
 
-        if (transcripts.length > 0) {
-          const text = transcripts.join("\n\n---\n\n");
-          const prompt = `Session transcripts from project "${group.projectName}":\n\n${text}\n\n/reflect`;
+        const result = yield* extractConversations(inputDir, outputDir, {
+          batches: Math.ceil(group.sessions.length / MAX_SESSIONS_PER_BATCH),
+          minSize: 200,
+        });
 
-          yield* claude.invoke(prompt, "sonnet");
-          yield* Console.error(`  Reflected on ${result.conversations.length} conversation(s)`);
+        if (result.conversations.length === 0) {
+          yield* Console.error(`  No meaningful conversations found, skipping`);
+        } else {
+          // Build transcript text from written files
+          const transcripts: string[] = [];
+          for (const writtenPath of result.writtenPaths) {
+            const content = yield* fs
+              .readFileString(writtenPath)
+              .pipe(Effect.catch(() => Effect.succeed("")));
+            if (content.length > 0) transcripts.push(content);
+          }
+
+          if (transcripts.length > 0) {
+            const text = transcripts.join("\n\n---\n\n");
+            const prompt = `Session transcripts from project "${group.projectName}":\n\n${text}\n\n/reflect`;
+
+            yield* claude.invoke(prompt, "sonnet");
+            yield* Console.error(`  Reflected on ${result.conversations.length} conversation(s)`);
+          }
         }
-      }
 
-      // Checkpoint: mark sessions as processed
-      const processedSessions = { ...(state.reflect?.processedSessions ?? {}) };
-      for (const session of group.sessions) {
-        processedSessions[`${group.dirName}/${session.name}`] = session.mtimeIso;
-      }
-      state = {
-        ...state,
-        reflect: {
-          lastRun: new Date().toISOString(),
-          processedSessions,
-        },
-      };
-      yield* writeState(brainDir, state);
+        // Checkpoint: only mark sessions processed after successful extraction + invocation
+        const processedSessions = { ...(state.reflect?.processedSessions ?? {}) };
+        for (const session of group.sessions) {
+          processedSessions[`${group.dirName}/${session.name}`] = session.mtimeIso;
+        }
+        state = {
+          ...state,
+          reflect: {
+            lastRun: new Date().toISOString(),
+            processedSessions,
+          },
+        };
+        yield* writeState(brainDir, state);
 
-      // Cleanup temp dir
-      yield* fs.remove(tmpDir, { recursive: true }).pipe(Effect.catch(() => Effect.void));
+        // Cleanup temp dir
+        yield* fs.remove(tmpDir, { recursive: true }).pipe(Effect.catch(() => Effect.void));
+      }).pipe(
+        Effect.catch((e) => Console.error(`  Failed to reflect on ${group.projectName}: ${e}`)),
+      );
     }
 
     yield* Console.error("Reflect complete");

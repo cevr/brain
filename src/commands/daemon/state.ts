@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import { Effect, Schema } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
@@ -106,36 +107,48 @@ export const writeState = Effect.fn("writeState")(function* (brainDir: string, s
 const lockPath = (brainDir: string, job: string, path: Path) =>
   path.join(brainDir, `.daemon-${job}.lock`);
 
-/** Acquire a lock for a daemon job. Fails if another process holds it. */
+/** Acquire a lock for a daemon job. Uses exclusive file creation (O_EXCL) to avoid TOCTOU races. */
 export const acquireLock = Effect.fn("acquireLock")(function* (brainDir: string, job: string) {
   const fs = yield* FileSystem;
   const path = yield* Path;
   const lock = lockPath(brainDir, job, path);
+  const pid = `${process.pid}\n`;
 
-  const exists = yield* fs.exists(lock).pipe(Effect.catch(() => Effect.succeed(false)));
+  // Attempt atomic create-or-fail via O_EXCL (wx flag)
+  const created = yield* Effect.try({
+    try: () => {
+      writeFileSync(lock, pid, { flag: "wx" });
+      return true as const;
+    },
+    catch: () => new BrainError({ message: "Lock file exists", code: "LOCKED" }),
+  }).pipe(Effect.catch(() => Effect.succeed(false as const)));
 
-  if (exists) {
-    const content = yield* fs.readFileString(lock).pipe(Effect.catch(() => Effect.succeed("")));
-    const pid = parseInt(content.trim(), 10);
+  if (created) return;
 
-    if (!Number.isNaN(pid) && isProcessAlive(pid)) {
-      return yield* new BrainError({
-        message: `Daemon job "${job}" is already running (PID ${pid})`,
-        code: "LOCKED",
-      });
-    }
-    // Stale lock — remove it
+  // Lock file exists — check if holder is alive
+  const content = yield* fs.readFileString(lock).pipe(Effect.catch(() => Effect.succeed("")));
+  const holderPid = parseInt(content.trim(), 10);
+
+  if (!Number.isNaN(holderPid) && isProcessAlive(holderPid)) {
+    return yield* new BrainError({
+      message: `Daemon job "${job}" is already running (PID ${holderPid}). If stale, remove ${lock}`,
+      code: "LOCKED",
+    });
   }
 
-  yield* fs.writeFileString(lock, `${process.pid}\n`).pipe(
-    Effect.mapError(
-      (e: PlatformError) =>
-        new BrainError({
-          message: `Cannot write lock: ${e.message}`,
-          code: "WRITE_FAILED",
-        }),
-    ),
-  );
+  // Stale lock — remove and retry once
+  yield* fs.remove(lock).pipe(Effect.catch(() => Effect.void));
+
+  yield* Effect.try({
+    try: () => {
+      writeFileSync(lock, pid, { flag: "wx" });
+    },
+    catch: () =>
+      new BrainError({
+        message: `Cannot acquire lock for "${job}" — concurrent process won the race`,
+        code: "LOCKED",
+      }),
+  });
 });
 
 /** Release lock for a daemon job */
