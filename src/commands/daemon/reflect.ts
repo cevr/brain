@@ -33,7 +33,7 @@ export const scanSessions = Effect.fn("scanSessions")(function* (state: DaemonSt
   const fs = yield* FileSystem;
   const path = yield* Path;
 
-  const home = yield* requireHome;
+  const home = yield* requireHome();
   const projectsDir = path.join(home, CLAUDE_PROJECTS_DIR);
 
   const exists = yield* fs.exists(projectsDir).pipe(Effect.catch(() => Effect.succeed(false)));

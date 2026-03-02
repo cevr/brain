@@ -71,10 +71,10 @@ ${scheduleKey}
 
 /** Install a launchd plist for a daemon job */
 export const installPlist = Effect.fn("installPlist")(function* (job: DaemonJob) {
-  yield* requireDarwin;
+  yield* requireDarwin();
   const fs = yield* FileSystem;
   const path = yield* Path;
-  const home = yield* requireHome;
+  const home = yield* requireHome();
   const brainBin = yield* resolveBrainBin();
 
   // Ensure log directory exists
@@ -148,10 +148,10 @@ export const installPlist = Effect.fn("installPlist")(function* (job: DaemonJob)
 
 /** Uninstall a launchd plist for a daemon job */
 export const uninstallPlist = Effect.fn("uninstallPlist")(function* (job: DaemonJob) {
-  yield* requireDarwin;
+  yield* requireDarwin();
   const fs = yield* FileSystem;
   const path = yield* Path;
-  const home = yield* requireHome;
+  const home = yield* requireHome();
   const plist = plistPath(home, job, path);
 
   const loaded = yield* isLoaded(job);
@@ -191,7 +191,7 @@ export const isLoaded = Effect.fn("isLoaded")(function* (job: DaemonJob) {
 export const rotateLogs = Effect.fn("rotateLogs")(function* () {
   const fs = yield* FileSystem;
   const path = yield* Path;
-  const home = yield* requireHome;
+  const home = yield* requireHome();
   const dir = logDir(home, path);
 
   const exists = yield* fs.exists(dir).pipe(Effect.catch(() => Effect.succeed(false)));
