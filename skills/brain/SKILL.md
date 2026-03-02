@@ -34,6 +34,8 @@ What do you need?
 | `brain snapshot <dir> [-o file]`      | Concatenate `.md` files with `=== path ===` delimiters   |
 | `brain extract <dir> <output> [-b N]` | Parse JSONL conversations into batched text files        |
 | `brain list [--json]`                 | List all vault files (one per line)                      |
+| `brain skills list [--json]`          | List installed skills, flag outdated ones                |
+| `brain skills sync`                   | Sync skills from source to installed (idempotent)        |
 
 ## Vault Structure
 
