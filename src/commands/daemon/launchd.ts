@@ -187,7 +187,10 @@ export const isLoaded = Effect.fn("isLoaded")(function* (job: DaemonJob) {
   });
 });
 
-/** Rotate daemon logs — remove entries older than 30 days */
+const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
+const KEEP_LINES = 1000;
+
+/** Rotate daemon logs — truncate to last 1000 lines when > 10MB */
 export const rotateLogs = Effect.fn("rotateLogs")(function* () {
   const fs = yield* FileSystem;
   const path = yield* Path;
@@ -200,18 +203,22 @@ export const rotateLogs = Effect.fn("rotateLogs")(function* () {
   const files = yield* fs
     .readDirectory(dir)
     .pipe(Effect.catch(() => Effect.succeed([] as string[])));
-  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
   for (const file of files) {
     if (!file.startsWith("daemon-") || !file.endsWith(".log")) continue;
     const filePath = path.join(dir, file);
     const stat = yield* fs.stat(filePath).pipe(Effect.catch(() => Effect.succeed(null)));
     if (stat === null) continue;
-    const mtime = stat.mtime ?? new Date(0);
-    if (mtime.getTime() < cutoff) {
-      yield* fs.remove(filePath).pipe(Effect.catch(() => Effect.void));
-      yield* Console.error(`  Rotated ${file}`);
-    }
+    if ((stat.size ?? 0) <= MAX_LOG_SIZE) continue;
+
+    // Truncate to last KEEP_LINES lines
+    const content = yield* fs.readFileString(filePath).pipe(Effect.catch(() => Effect.succeed("")));
+    if (content.length === 0) continue;
+
+    const lines = content.split("\n");
+    const kept = lines.slice(-KEEP_LINES).join("\n");
+    yield* fs.writeFileString(filePath, kept).pipe(Effect.catch(() => Effect.void));
+    yield* Console.error(`  Rotated ${file} (truncated to ${String(KEEP_LINES)} lines)`);
   }
 });
 

@@ -6,7 +6,6 @@ import { BrainError } from "../../errors/index.js";
 import { ClaudeService } from "../../services/Claude.js";
 import { ConfigService } from "../../services/Config.js";
 import { VaultService } from "../../services/Vault.js";
-import { extractConversations } from "../extract.js";
 import {
   acquireLock,
   deriveProjectName,
@@ -19,14 +18,28 @@ import {
 } from "./state.js";
 
 const CLAUDE_PROJECTS_DIR = ".claude/projects";
-const MAX_SESSIONS_PER_BATCH = 5;
+const MAX_TOTAL_LINES = 2000;
 
 interface SessionFile {
   readonly name: string;
   readonly path: string;
   readonly mtime: Date;
   readonly mtimeIso: string;
+  readonly lineCount: number;
 }
+
+/** Count newlines in a file (line count approximation) */
+const countLines = Effect.fn("countLines")(function* (filePath: string) {
+  const fs = yield* FileSystem;
+  const content = yield* fs.readFileString(filePath).pipe(Effect.catch(() => Effect.succeed("")));
+  if (content.length === 0) return 0;
+  let count = 0;
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === "\n") count++;
+  }
+  // Add 1 if file doesn't end with newline (last line without trailing \n)
+  return content[content.length - 1] === "\n" ? count : count + 1;
+});
 
 /** @internal */
 export const scanSessions = Effect.fn("scanSessions")(function* (state: DaemonState) {
@@ -84,7 +97,10 @@ export const scanSessions = Effect.fn("scanSessions")(function* (state: DaemonSt
       // Skip if already processed with same mtime
       if (recorded === mtimeIso) continue;
 
-      sessions.push({ name: file, path: filePath, mtime, mtimeIso });
+      const lineCount = yield* countLines(filePath);
+      if (lineCount === 0) continue;
+
+      sessions.push({ name: file, path: filePath, mtime, mtimeIso, lineCount });
     }
 
     if (sessions.length > 0) {
@@ -100,12 +116,33 @@ export const scanSessions = Effect.fn("scanSessions")(function* (state: DaemonSt
   return groups;
 });
 
+/**
+ * Build file-path prompt for Claude. Lists session JSONL files with line ranges
+ * so Claude can Read them directly. Caps total lines at MAX_TOTAL_LINES.
+ */
+const buildFilePathPrompt = (projectName: string, sessions: readonly SessionFile[]): string => {
+  // Distribute line budget across sessions, newest first
+  const sorted = [...sessions].sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+  let remaining = MAX_TOTAL_LINES;
+  const entries: string[] = [];
+
+  for (const session of sorted) {
+    if (remaining <= 0) break;
+    const lines = Math.min(session.lineCount, remaining);
+    // Read from the end (most recent messages) if truncated
+    const offset = session.lineCount > lines ? session.lineCount - lines + 1 : 1;
+    entries.push(`${session.path} (lines ${String(offset)}-${String(offset + lines - 1)})`);
+    remaining -= lines;
+  }
+
+  return `Session files for project "${projectName}":\n\n${entries.join("\n")}\n\n/reflect`;
+};
+
 /** Run the reflect daemon job */
 export const runReflect = Effect.fn("runReflect")(function* () {
   const config = yield* ConfigService;
   const vault = yield* VaultService;
   const claude = yield* ClaudeService;
-  const fs = yield* FileSystem;
   const path = yield* Path;
 
   const brainDir = yield* config.globalVaultPath();
@@ -130,56 +167,13 @@ export const runReflect = Effect.fn("runReflect")(function* () {
         const projectDir = path.join(brainDir, "projects", group.projectName);
         yield* vault.init(projectDir, { minimal: true }).pipe(Effect.catch(() => Effect.void));
 
-        // Extract conversations to a temp dir, then build prompt
-        const tmpDir = yield* fs.makeTempDirectory().pipe(
-          Effect.catch(() =>
-            Effect.gen(function* () {
-              const d = path.join(brainDir, ".daemon-tmp");
-              yield* fs.makeDirectory(d, { recursive: true }).pipe(Effect.catch(() => Effect.void));
-              return d;
-            }),
-          ),
-        );
+        // Build prompt with file paths — Claude reads them via its Read tool
+        const prompt = buildFilePathPrompt(group.projectName, group.sessions);
 
-        const inputDir = path.join(tmpDir, "input");
-        const outputDir = path.join(tmpDir, "output");
-        yield* fs
-          .makeDirectory(inputDir, { recursive: true })
-          .pipe(Effect.catch(() => Effect.void));
+        yield* claude.invoke(prompt, "sonnet");
+        yield* Console.error(`  Reflected on ${group.sessions.length} session(s)`);
 
-        // Copy session files into temp input dir
-        for (const session of group.sessions) {
-          const dest = path.join(inputDir, session.name);
-          yield* fs.copyFile(session.path, dest).pipe(Effect.catch(() => Effect.void));
-        }
-
-        const result = yield* extractConversations(inputDir, outputDir, {
-          batches: Math.ceil(group.sessions.length / MAX_SESSIONS_PER_BATCH),
-          minSize: 200,
-        });
-
-        if (result.conversations.length === 0) {
-          yield* Console.error(`  No meaningful conversations found, skipping`);
-        } else {
-          // Build transcript text from written files
-          const transcripts: string[] = [];
-          for (const writtenPath of result.writtenPaths) {
-            const content = yield* fs
-              .readFileString(writtenPath)
-              .pipe(Effect.catch(() => Effect.succeed("")));
-            if (content.length > 0) transcripts.push(content);
-          }
-
-          if (transcripts.length > 0) {
-            const text = transcripts.join("\n\n---\n\n");
-            const prompt = `Session transcripts from project "${group.projectName}":\n\n${text}\n\n/reflect`;
-
-            yield* claude.invoke(prompt, "sonnet");
-            yield* Console.error(`  Reflected on ${result.conversations.length} conversation(s)`);
-          }
-        }
-
-        // Checkpoint: only mark sessions processed after successful extraction + invocation
+        // Checkpoint: mark sessions processed after successful invocation
         const processedSessions = { ...(state.reflect?.processedSessions ?? {}) };
         for (const session of group.sessions) {
           processedSessions[`${group.dirName}/${session.name}`] = session.mtimeIso;
@@ -192,9 +186,6 @@ export const runReflect = Effect.fn("runReflect")(function* () {
           },
         };
         yield* writeState(brainDir, state);
-
-        // Cleanup temp dir
-        yield* fs.remove(tmpDir, { recursive: true }).pipe(Effect.catch(() => Effect.void));
       }).pipe(
         Effect.catch((e) => Console.error(`  Failed to reflect on ${group.projectName}: ${e}`)),
       );
