@@ -1,6 +1,6 @@
 ---
 name: brain
-description: Persistent agent memory vault managed by the `brain` CLI. Use when writing to brain, reading vault files, checking vault status, or any interaction with the `~/.brain/` vault. Triggers on "brain", "add to brain", "write to brain", "vault", "brain status".
+description: Persistent agent memory vault managed by the `brain` CLI. Use when writing to brain, reading vault files, checking vault status, managing skills, or any interaction with the `~/.brain/` vault. Triggers on "brain", "add to brain", "write to brain", "vault", "brain status", "brain skills", "sync skills", "outdated skills".
 ---
 
 # brain

@@ -1,0 +1,38 @@
+# Brain CLI
+
+Effect v4 CLI for persistent agent memory. Bun runtime, single-binary build.
+
+## Commands
+
+```bash
+bun run gate          # typecheck + lint + fmt + test + build (pre-commit hook)
+bun run typecheck     # tsc --noEmit
+bun run build         # compile to bin/brain, symlink to ~/.bun/bin/brain
+bun run test          # bun test
+```
+
+## Architecture
+
+- Effect v4 (effect-smol): `ServiceMap.Service`, `Effect.fn`, `Schema.TaggedErrorClass`
+- Three services: `ConfigService` (paths/env), `VaultService` (fs ops), `BuildInfo` (compile-time constants)
+- Commands are `Command.make` from `effect/unstable/cli`, composed in `src/commands/index.ts`
+- Errors use structured `code` fields — match with `e.code`, not string parsing
+- `main.ts` wraps CLI in custom error handler: app errors → stderr, `--json` → structured JSON
+
+## Gotchas
+
+- `BuildInfo.repoRoot` resolves differently in dev (`import.meta.url`) vs compiled (`REPO_ROOT` define). Test with `BuildInfo.layerTest`
+- `init.ts` exports `wireHooks`, `copyStarterPrinciples`, `installSkills`, `copyDir` as `@internal` — tests import them directly
+- `Effect.fn` with recursive calls needs explicit type annotation on the binding (see `copyDir`, `dirsHaveDiff`)
+- `brain skills list` compares repo `skills/` against `~/.claude/skills/` — only flags skills that exist in both
+- `brain skills sync` follows symlinks: if `~/.claude/skills/foo` is a symlink, it syncs to the resolved target
+- Vault `filterMdFiles` strips `.md` extension from returned paths — callers get `principles/testing`, not `principles/testing.md`
+- `brain inject` must never fail (exit 0 always) — it runs as a SessionStart hook
+
+## For Related Docs
+
+| Topic                | Location                              |
+| -------------------- | ------------------------------------- |
+| Vault ops, CLI usage | `skills/brain/SKILL.md`               |
+| Effect v4 patterns   | `~/.claude/skills/effect-v4/SKILL.md` |
+| Test helpers         | `tests/helpers/index.ts`              |
