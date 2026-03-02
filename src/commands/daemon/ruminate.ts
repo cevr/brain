@@ -11,7 +11,7 @@ export const runRuminate = Effect.fn("runRuminate")(function* () {
 
   yield* acquireLock(brainDir, "ruminate");
 
-  try {
+  yield* Effect.gen(function* () {
     yield* Console.error("Ruminating...");
     yield* claude.invoke("/ruminate", "opus");
 
@@ -22,7 +22,5 @@ export const runRuminate = Effect.fn("runRuminate")(function* () {
     });
 
     yield* Console.error("Ruminate complete");
-  } finally {
-    yield* releaseLock(brainDir, "ruminate");
-  }
+  }).pipe(Effect.ensuring(releaseLock(brainDir, "ruminate")));
 });

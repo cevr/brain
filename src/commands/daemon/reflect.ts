@@ -109,7 +109,7 @@ export const runReflect = Effect.fn("runReflect")(function* () {
   const brainDir = yield* config.globalVaultPath();
   yield* acquireLock(brainDir, "reflect");
 
-  try {
+  yield* Effect.gen(function* () {
     let state = yield* readState(brainDir);
     const groups = yield* scanSessions(state);
 
@@ -193,7 +193,5 @@ export const runReflect = Effect.fn("runReflect")(function* () {
     }
 
     yield* Console.error("Reflect complete");
-  } finally {
-    yield* releaseLock(brainDir, "reflect");
-  }
+  }).pipe(Effect.ensuring(releaseLock(brainDir, "reflect")));
 });

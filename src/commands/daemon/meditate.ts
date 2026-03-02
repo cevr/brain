@@ -11,7 +11,7 @@ export const runMeditate = Effect.fn("runMeditate")(function* () {
 
   yield* acquireLock(brainDir, "meditate");
 
-  try {
+  yield* Effect.gen(function* () {
     yield* Console.error("Meditating...");
     yield* claude.invoke("/meditate", "opus");
 
@@ -22,7 +22,5 @@ export const runMeditate = Effect.fn("runMeditate")(function* () {
     });
 
     yield* Console.error("Meditate complete");
-  } finally {
-    yield* releaseLock(brainDir, "meditate");
-  }
+  }).pipe(Effect.ensuring(releaseLock(brainDir, "meditate")));
 });
