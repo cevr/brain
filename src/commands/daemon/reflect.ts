@@ -87,9 +87,10 @@ export const scanSessions = Effect.fn("scanSessions")(function* (state: DaemonSt
     }
 
     if (sessions.length > 0) {
+      const projectName = yield* deriveProjectName(dirName);
       groups.push({
         dirName,
-        projectName: deriveProjectName(dirName),
+        projectName,
         sessions,
       });
     }

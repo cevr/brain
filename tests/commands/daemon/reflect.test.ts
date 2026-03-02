@@ -72,7 +72,7 @@ describe("daemon reflect", () => {
             const groups = yield* scanSessions({ reflect: {}, ruminate: {}, meditate: {} });
 
             expect(groups).toHaveLength(1);
-            expect(groups[0]?.projectName).toBe("alpha");
+            expect(groups[0]?.projectName).toBe("project-alpha");
             expect(groups[0]?.sessions).toHaveLength(2);
           } finally {
             process.env["HOME"] = origHome;
@@ -201,7 +201,7 @@ describe("daemon reflect", () => {
             expect(groups).toHaveLength(2);
 
             const names = groups.map((g) => g.projectName).sort();
-            expect(names).toEqual(["one", "two"]);
+            expect(names).toEqual(["project-one", "project-two"]);
           } finally {
             process.env["HOME"] = origHome;
           }

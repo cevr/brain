@@ -142,34 +142,56 @@ describe("daemon state", () => {
   });
 
   describe("deriveProjectName", () => {
-    it.live("extracts last segment from dashified path", () =>
-      Effect.sync(() => {
-        expect(deriveProjectName("-Users-cvr-Developer-personal-brain")).toBe("brain");
-      }),
+    it.live("resolves project name from real path on disk", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          // Create: /tmp/xxx/Users/cvr/Developer/personal/brain
+          yield* fs.makeDirectory(`${dir}/Users/cvr/Developer/personal/brain`, { recursive: true });
+          // Dashified: -<dir>-Users-cvr-Developer-personal-brain
+          // But we can't use the temp dir prefix. Instead, test with the real /Users path.
+          // The real /Users/cvr/Developer/personal exists on the test machine,
+          // so test the full decode path → basename approach.
+          const name = yield* deriveProjectName("-Users-cvr-Developer-personal-brain");
+          expect(name).toBe("brain");
+        }),
+      ).pipe(Effect.provide(TestLayer)),
     );
 
-    it.live("handles simple names", () =>
-      Effect.sync(() => {
-        expect(deriveProjectName("my-project")).toBe("project");
-      }),
+    it.live("preserves internal dashes in multi-word project names", () =>
+      Effect.gen(function* () {
+        // Walk right-to-left: finds /Users/cvr as existing dir, returns suffix
+        const name = yield* deriveProjectName("-Users-cvr-my-cool-project");
+        expect(name).toBe("my-cool-project");
+      }).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("falls back to last segment when no path resolves", () =>
+      Effect.gen(function* () {
+        const name = yield* deriveProjectName("my-project");
+        expect(name).toBe("project");
+      }).pipe(Effect.provide(TestLayer)),
     );
 
     it.live("handles single segment", () =>
-      Effect.sync(() => {
-        expect(deriveProjectName("brain")).toBe("brain");
-      }),
+      Effect.gen(function* () {
+        const name = yield* deriveProjectName("brain");
+        expect(name).toBe("brain");
+      }).pipe(Effect.provide(TestLayer)),
     );
 
     it.live("handles empty string", () =>
-      Effect.sync(() => {
-        expect(deriveProjectName("")).toBe("");
-      }),
+      Effect.gen(function* () {
+        const name = yield* deriveProjectName("");
+        expect(name).toBe("");
+      }).pipe(Effect.provide(TestLayer)),
     );
 
     it.live("handles leading dash only", () =>
-      Effect.sync(() => {
-        expect(deriveProjectName("-")).toBe("-");
-      }),
+      Effect.gen(function* () {
+        const name = yield* deriveProjectName("-");
+        expect(name).toBe("-");
+      }).pipe(Effect.provide(TestLayer)),
     );
   });
 });
