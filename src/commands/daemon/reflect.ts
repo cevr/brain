@@ -3,6 +3,7 @@ import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import { BrainError } from "../../errors/index.js";
+import { ClaudeService } from "../../services/Claude.js";
 import { ConfigService } from "../../services/Config.js";
 import { VaultService } from "../../services/Vault.js";
 import { extractConversations } from "../extract.js";
@@ -26,8 +27,8 @@ interface SessionFile {
   readonly mtimeIso: string;
 }
 
-/** Scan ~/.claude/projects/ for settled, unprocessed JSONL sessions */
-const scanSessions = Effect.fn("scanSessions")(function* (state: DaemonState) {
+/** @internal */
+export const scanSessions = Effect.fn("scanSessions")(function* (state: DaemonState) {
   const fs = yield* FileSystem;
   const path = yield* Path;
 
@@ -101,6 +102,7 @@ const scanSessions = Effect.fn("scanSessions")(function* (state: DaemonState) {
 export const runReflect = Effect.fn("runReflect")(function* () {
   const config = yield* ConfigService;
   const vault = yield* VaultService;
+  const claude = yield* ClaudeService;
   const fs = yield* FileSystem;
   const path = yield* Path;
 
@@ -167,7 +169,7 @@ export const runReflect = Effect.fn("runReflect")(function* () {
           const text = transcripts.join("\n\n---\n\n");
           const prompt = `Session transcripts from project "${group.projectName}":\n\n${text}\n\n/reflect`;
 
-          yield* spawnClaude(prompt, "sonnet");
+          yield* claude.invoke(prompt, "sonnet");
           yield* Console.error(`  Reflected on ${result.conversations.length} conversation(s)`);
         }
       }
@@ -194,36 +196,4 @@ export const runReflect = Effect.fn("runReflect")(function* () {
   } finally {
     yield* releaseLock(brainDir, "reflect");
   }
-});
-
-/** Spawn claude CLI as a subprocess */
-const spawnClaude = Effect.fn("spawnClaude")(function* (prompt: string, model: string) {
-  yield* Effect.tryPromise({
-    try: async () => {
-      const proc = Bun.spawn(
-        [
-          "claude",
-          "-p",
-          prompt,
-          "--dangerously-skip-permissions",
-          "--model",
-          model,
-          "--no-session-persistence",
-        ],
-        {
-          stdout: "ignore",
-          stderr: "inherit",
-        },
-      );
-      const code = await proc.exited;
-      if (code !== 0) {
-        throw new Error(`claude exited with code ${code}`);
-      }
-    },
-    catch: (e) =>
-      new BrainError({
-        message: `Claude invocation failed: ${e instanceof Error ? e.message : String(e)}`,
-        code: "SPAWN_FAILED",
-      }),
-  });
 });
