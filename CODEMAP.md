@@ -25,8 +25,8 @@ src/
 │   ├── extract.ts       # Parse JSONL conversations
 │   ├── daemon.ts        # Daemon parent command + subcommands (start/stop/status/run/logs)
 │   └── daemon/
-│       ├── state.ts     # DaemonState schema, read/write, lockfiles, isSettled, deriveProjectName
-│       ├── reflect.ts   # Hourly: scan sessions, extract, invoke /reflect per project
+│       ├── state.ts     # DaemonState schema, read/write, lockfiles, requireHome, requireDarwin, deriveProjectName
+│       ├── reflect.ts   # Hourly: scan sessions, pass file paths to Claude /reflect per project
 │       ├── ruminate.ts  # Weekly: invoke /ruminate
 │       ├── meditate.ts  # Monthly: invoke /meditate
 │       └── launchd.ts   # Plist generation, install/uninstall, isLoaded, log rotation
@@ -45,10 +45,14 @@ tests/
 
 ## Key Patterns
 
-| Pattern                   | Where                          | Notes                                                                      |
-| ------------------------- | ------------------------------ | -------------------------------------------------------------------------- |
-| Service layer composition | `main.ts:27-32`                | `ConfigService + VaultService + BuildInfo + ClaudeService` → `BunServices` |
-| Recursive dir comparison  | `skills.ts:dirsHaveDiff`       | Byte-level file comparison for outdated detection                          |
-| Minimal init mode         | `Vault.ts:init({ minimal })`   | Project sub-vaults get only dir + index.md                                 |
-| Project auto-detection    | `Config.ts:currentProjectName` | `BRAIN_PROJECT` → git root → cwd basename                                  |
-| Error code matching       | All commands                   | `e.code === "INDEX_MISSING"`, never string match on `e.message`            |
+| Pattern                   | Where                            | Notes                                                                      |
+| ------------------------- | -------------------------------- | -------------------------------------------------------------------------- |
+| Service layer composition | `main.ts:27-32`                  | `ConfigService + VaultService + BuildInfo + ClaudeService` → `BunServices` |
+| Recursive dir comparison  | `skills.ts:dirsHaveDiff`         | Byte-level file comparison for outdated detection                          |
+| Minimal init mode         | `Vault.ts:init({ minimal })`     | Project sub-vaults get only dir + index.md                                 |
+| Project auto-detection    | `Config.ts:currentProjectName`   | `BRAIN_PROJECT` → git root → cwd basename                                  |
+| Error code matching       | All commands                     | `e.code === "INDEX_MISSING"`, never string match on `e.message`            |
+| Atomic lock (O_EXCL)      | `state.ts:acquireLock`           | `writeFileSync(path, pid, { flag: "wx" })` — no TOCTOU race                |
+| Effect.ensuring for locks | `reflect/ruminate/meditate.ts`   | Guarantees lock release even on fiber interruption                         |
+| File-path prompts         | `reflect.ts:buildFilePathPrompt` | Passes session file paths to Claude instead of inlining content            |
+| Platform guard            | `state.ts:requireDarwin`         | Fails with `UNSUPPORTED_PLATFORM` on non-macOS for launchd commands        |

@@ -23,24 +23,24 @@ What do you need?
 
 ## Quick Reference
 
-| Command                                | What it does                                               |
-| -------------------------------------- | ---------------------------------------------------------- |
-| `brain vault`                          | Print active vault path (pipeable)                         |
-| `brain vault --json`                   | `{ global, project, active }`                              |
-| `brain inject`                         | Print vault index (SessionStart hook)                      |
-| `brain reindex [--all]`                | Rebuild `index.md` from disk (no-op if unchanged)          |
-| `brain status [--json]`                | File count, sections, orphans                              |
-| `brain init [--project] [--global]`    | Scaffold vault, write config, wire hooks, install skills   |
-| `brain snapshot <dir> [-o file]`       | Concatenate `.md` files with `=== path ===` delimiters     |
-| `brain extract <dir> <output> [-b N]`  | Parse JSONL conversations into batched text files          |
-| `brain list [--json]`                  | List all vault files (one per line)                        |
-| `brain skills list [--json]`           | List installed skills, flag outdated ones                  |
-| `brain skills sync`                    | Sync skills from source to installed (idempotent)          |
-| `brain daemon start`                   | Install launchd jobs (reflect/ruminate/meditate)           |
-| `brain daemon stop`                    | Uninstall all daemon launchd jobs                          |
-| `brain daemon status [--json]`         | Show loaded jobs and last run times                        |
-| `brain daemon run <job>`               | Run a specific job immediately (reflect/ruminate/meditate) |
-| `brain daemon logs [--job X] [--tail]` | View daemon logs                                           |
+| Command                               | What it does                                               |
+| ------------------------------------- | ---------------------------------------------------------- |
+| `brain vault`                         | Print active vault path (pipeable)                         |
+| `brain vault --json`                  | `{ global, project, active }`                              |
+| `brain inject`                        | Print vault index (SessionStart hook)                      |
+| `brain reindex [--all]`               | Rebuild `index.md` from disk (no-op if unchanged)          |
+| `brain status [--json]`               | File count, sections, orphans                              |
+| `brain init [--project] [--global]`   | Scaffold vault, write config, wire hooks, install skills   |
+| `brain snapshot <dir> [-o file]`      | Concatenate `.md` files with `=== path ===` delimiters     |
+| `brain extract <dir> <output> [-b N]` | Parse JSONL conversations into batched text files          |
+| `brain list [--json]`                 | List all vault files (one per line)                        |
+| `brain skills list [--json]`          | List installed skills, flag outdated ones                  |
+| `brain skills sync`                   | Sync skills from source to installed (idempotent)          |
+| `brain daemon start`                  | Install launchd jobs (reflect/ruminate/meditate)           |
+| `brain daemon stop`                   | Uninstall all daemon launchd jobs                          |
+| `brain daemon status [--json]`        | Show loaded jobs and last run times                        |
+| `brain daemon run <job>`              | Run a specific job immediately (reflect/ruminate/meditate) |
+| `brain daemon logs [job] [--tail]`    | View daemon logs (optional job as positional arg)          |
 
 ## Vault Structure
 
@@ -138,15 +138,18 @@ Common error codes: `NOT_INITIALIZED`, `READ_FAILED`, `WRITE_FAILED`, `INDEX_MIS
 
 ## Daemon
 
-Automated vault maintenance via launchd. Three jobs on different cadences:
+Automated vault maintenance via launchd (**macOS-only**). Three jobs on different cadences:
 
-| Job      | Cadence           | Model  | What                                                                |
-| -------- | ----------------- | ------ | ------------------------------------------------------------------- |
-| reflect  | Hourly            | sonnet | Extract learnings from new settled sessions into `projects/<name>/` |
-| ruminate | Weekly (Sun 3am)  | opus   | Mine session archives for missed patterns                           |
-| meditate | Monthly (1st 3am) | opus   | Audit + prune + distill vault quality                               |
+| Job      | Cadence           | Model  | What                                                   |
+| -------- | ----------------- | ------ | ------------------------------------------------------ |
+| reflect  | Hourly            | sonnet | Pass session file paths to Claude /reflect per project |
+| ruminate | Weekly (Sun 3am)  | opus   | Mine session archives for missed patterns              |
+| meditate | Monthly (1st 3am) | opus   | Audit + prune + distill vault quality                  |
 
 **State**: `~/.brain/.daemon.json` tracks processed sessions and last run times.
-**Locks**: `~/.brain/.daemon-{job}.lock` (PID-based, stale lock detection).
-**Logs**: `~/.brain/logs/daemon-{job}.log` (auto-rotated, 30 day retention).
+**Locks**: `~/.brain/.daemon-{job}.lock` — atomic acquisition via `O_EXCL`, stale lock detection. `Effect.ensuring` guarantees release on interruption.
+**Logs**: `~/.brain/logs/daemon-{job}.log` — size-based rotation (truncate to last 1000 lines when >10MB).
 **Session detection**: A session is "settled" when its mtime is >30 min ago. Already-processed sessions (same mtime) are skipped.
+**Reflect approach**: Passes session JSONL file paths with line ranges in the prompt so Claude reads them via its Read tool. Max 2000 lines per group, newest first.
+**`--json` output**: All subcommands (start/stop/status/run) support `--json`. Status includes schedule, lock state, and processed session count.
+**Error codes**: `NO_HOME` (HOME unset), `UNSUPPORTED_PLATFORM` (non-macOS), `LOCKED` (job already running, includes lock path in message).
