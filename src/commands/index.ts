@@ -8,9 +8,21 @@ import { snapshot } from "./snapshot.js";
 import { extract } from "./extract.js";
 import { list } from "./list.js";
 import { skills } from "./skills.js";
+import { daemon } from "./daemon.js";
 
 const root = Command.make("brain").pipe(Command.withDescription("Persistent agent memory vault"));
 
 export const command = root.pipe(
-  Command.withSubcommands([init, vault, reindex, inject, status, snapshot, extract, list, skills]),
+  Command.withSubcommands([
+    init,
+    vault,
+    reindex,
+    inject,
+    status,
+    snapshot,
+    extract,
+    list,
+    skills,
+    daemon,
+  ]),
 );

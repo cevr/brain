@@ -126,8 +126,7 @@ export const runReflect = Effect.fn("runReflect")(function* () {
       yield* vault.init(projectDir, { minimal: true }).pipe(Effect.catch(() => Effect.void));
 
       // Extract conversations to a temp dir, then build prompt
-      const tmpDir = yield* fs.makeTempDirectoryScoped().pipe(
-        // Fallback: use a dir under brainDir
+      const tmpDir = yield* fs.makeTempDirectory().pipe(
         Effect.catch(() =>
           Effect.gen(function* () {
             const d = path.join(brainDir, ".daemon-tmp");
