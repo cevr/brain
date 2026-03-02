@@ -162,6 +162,29 @@ export const releaseLock = Effect.fn("releaseLock")(function* (brainDir: string,
 
 // --- Utilities ---
 
+/** Require HOME to be set, failing with a clear error if missing */
+export const requireHome: Effect.Effect<string, BrainError> = Effect.suspend(() => {
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
+  if (home.length > 0) return Effect.succeed(home);
+  return Effect.fail(
+    new BrainError({
+      message: "HOME not set — run with HOME defined",
+      code: "NO_HOME",
+    }),
+  );
+});
+
+/** Guard that fails on non-macOS platforms (launchd is macOS-only) */
+export const requireDarwin: Effect.Effect<void, BrainError> = Effect.suspend(() => {
+  if (process.platform === "darwin") return Effect.void;
+  return Effect.fail(
+    new BrainError({
+      message: "brain daemon requires macOS (launchd). Linux: use systemd or cron manually",
+      code: "UNSUPPORTED_PLATFORM",
+    }),
+  );
+});
+
 /** Check if a file's mtime indicates it's settled (no writes for 30+ min) */
 export const isSettled = (mtime: Date): boolean => Date.now() - mtime.getTime() > SETTLE_MS;
 

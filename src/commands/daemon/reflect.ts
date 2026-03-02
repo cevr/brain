@@ -13,6 +13,7 @@ import {
   isSettled,
   readState,
   releaseLock,
+  requireHome,
   writeState,
   type DaemonState,
 } from "./state.js";
@@ -32,7 +33,7 @@ export const scanSessions = Effect.fn("scanSessions")(function* (state: DaemonSt
   const fs = yield* FileSystem;
   const path = yield* Path;
 
-  const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
+  const home = yield* requireHome;
   const projectsDir = path.join(home, CLAUDE_PROJECTS_DIR);
 
   const exists = yield* fs.exists(projectsDir).pipe(Effect.catch(() => Effect.succeed(false)));

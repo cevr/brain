@@ -4,7 +4,7 @@ import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { ConfigService } from "../services/Config.js";
 import { BrainError } from "../errors/index.js";
-import { readState } from "./daemon/state.js";
+import { readState, requireHome } from "./daemon/state.js";
 import { runReflect } from "./daemon/reflect.js";
 import { runRuminate } from "./daemon/ruminate.js";
 import { runMeditate } from "./daemon/meditate.js";
@@ -133,7 +133,7 @@ const logs = Command.make("logs", { job: jobFlag, tail: tailFlag }).pipe(
     Effect.gen(function* () {
       const fs = yield* FileSystem;
       const path = yield* Path;
-      const home = process.env["HOME"] ?? "";
+      const home = yield* requireHome;
       const logsDir = path.join(home, ".brain", "logs");
 
       const exists = yield* fs.exists(logsDir).pipe(Effect.catch(() => Effect.succeed(false)));
