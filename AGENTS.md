@@ -14,7 +14,7 @@ bun run test          # bun test
 ## Architecture
 
 - Effect v4 (effect-smol): `ServiceMap.Service`, `Effect.fn`, `Schema.TaggedErrorClass`
-- Three services: `ConfigService` (paths/env), `VaultService` (fs ops), `BuildInfo` (compile-time constants)
+- Four services: `ConfigService` (paths/env), `VaultService` (fs ops), `BuildInfo` (compile-time constants), `ClaudeService` (claude CLI invocation)
 - Commands are `Command.make` from `effect/unstable/cli`, composed in `src/commands/index.ts`
 - Errors use structured `code` fields — match with `e.code`, not string parsing
 - `main.ts` wraps CLI in custom error handler: app errors → stderr, `--json` → structured JSON
@@ -28,6 +28,9 @@ bun run test          # bun test
 - `brain skills sync` follows symlinks: if `~/.claude/skills/foo` is a symlink, it syncs to the resolved target
 - Vault `filterMdFiles` strips `.md` extension from returned paths — callers get `principles/testing`, not `principles/testing.md`
 - `brain inject` must never fail (exit 0 always) — it runs as a SessionStart hook
+- Daemon state lives at `~/.brain/.daemon.json`, lockfiles at `~/.brain/.daemon-{job}.lock`
+- Daemon session detection: settled = mtime > 30 min ago. Project dirs in `~/.claude/projects/` use dashified absolute paths
+- `ClaudeService` wraps `Bun.spawn` for `claude` CLI — use `.layerTest(ref)` in tests to capture invocations without spawning
 
 ## For Related Docs
 

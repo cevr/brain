@@ -10,7 +10,8 @@ src/
 ├── services/
 │   ├── Config.ts        # Paths, env detection, project name resolution
 │   ├── Vault.ts         # Vault init, reindex, status, snapshot, file listing
-│   └── BuildInfo.ts     # Compile-time repo root + version
+│   ├── BuildInfo.ts     # Compile-time repo root + version
+│   └── Claude.ts        # Claude CLI invocation (layerTest captures calls via Ref)
 ├── commands/
 │   ├── index.ts         # Root command, subcommand wiring
 │   ├── init.ts          # Vault scaffold, hooks, skills install (largest command)
@@ -21,7 +22,14 @@ src/
 │   ├── vault.ts         # Print active vault path
 │   ├── list.ts          # List vault files
 │   ├── snapshot.ts      # Concatenate .md files
-│   └── extract.ts       # Parse JSONL conversations
+│   ├── extract.ts       # Parse JSONL conversations
+│   ├── daemon.ts        # Daemon parent command + subcommands (start/stop/status/run/logs)
+│   └── daemon/
+│       ├── state.ts     # DaemonState schema, read/write, lockfiles, isSettled, deriveProjectName
+│       ├── reflect.ts   # Hourly: scan sessions, extract, invoke /reflect per project
+│       ├── ruminate.ts  # Weekly: invoke /ruminate
+│       ├── meditate.ts  # Monthly: invoke /meditate
+│       └── launchd.ts   # Plist generation, install/uninstall, isLoaded, log rotation
 scripts/
 └── build.ts             # Bun.build with compile-time defines → bin/brain
 starter/
@@ -31,15 +39,16 @@ skills/                  # Brain-managed skills (copied to ~/.claude/skills/ by 
 tests/
 ├── helpers/index.ts     # Shared withTempDir helper
 ├── services/            # Config, Vault service tests
-└── commands/            # Command handler tests (inject, init, etc.)
+├── commands/            # Command handler tests (inject, init, etc.)
+└── commands/daemon/     # Daemon state + reflect tests
 ```
 
 ## Key Patterns
 
-| Pattern                   | Where                          | Notes                                                           |
-| ------------------------- | ------------------------------ | --------------------------------------------------------------- |
-| Service layer composition | `main.ts:26-28`                | `ConfigService + VaultService + BuildInfo` → `BunServices`      |
-| Recursive dir comparison  | `skills.ts:dirsHaveDiff`       | Byte-level file comparison for outdated detection               |
-| Minimal init mode         | `Vault.ts:init({ minimal })`   | Project sub-vaults get only dir + index.md                      |
-| Project auto-detection    | `Config.ts:currentProjectName` | `BRAIN_PROJECT` → git root → cwd basename                       |
-| Error code matching       | All commands                   | `e.code === "INDEX_MISSING"`, never string match on `e.message` |
+| Pattern                   | Where                          | Notes                                                                      |
+| ------------------------- | ------------------------------ | -------------------------------------------------------------------------- |
+| Service layer composition | `main.ts:27-32`                | `ConfigService + VaultService + BuildInfo + ClaudeService` → `BunServices` |
+| Recursive dir comparison  | `skills.ts:dirsHaveDiff`       | Byte-level file comparison for outdated detection                          |
+| Minimal init mode         | `Vault.ts:init({ minimal })`   | Project sub-vaults get only dir + index.md                                 |
+| Project auto-detection    | `Config.ts:currentProjectName` | `BRAIN_PROJECT` → git root → cwd basename                                  |
+| Error code matching       | All commands                   | `e.code === "INDEX_MISSING"`, never string match on `e.message`            |

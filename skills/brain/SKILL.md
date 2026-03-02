@@ -1,6 +1,6 @@
 ---
 name: brain
-description: Persistent agent memory vault managed by the `brain` CLI. Use when writing to brain, reading vault files, checking vault status, managing skills, or any interaction with the `~/.brain/` vault. Triggers on "brain", "add to brain", "write to brain", "vault", "brain status", "brain skills", "sync skills", "outdated skills".
+description: Persistent agent memory vault managed by the `brain` CLI. Use when writing to brain, reading vault files, checking vault status, managing skills, running daemon, or any interaction with the `~/.brain/` vault. Triggers on "brain", "add to brain", "write to brain", "vault", "brain status", "brain skills", "sync skills", "outdated skills", "brain daemon", "daemon start", "daemon stop".
 ---
 
 # brain
@@ -23,19 +23,24 @@ What do you need?
 
 ## Quick Reference
 
-| Command                               | What it does                                             |
-| ------------------------------------- | -------------------------------------------------------- |
-| `brain vault`                         | Print active vault path (pipeable)                       |
-| `brain vault --json`                  | `{ global, project, active }`                            |
-| `brain inject`                        | Print vault index (SessionStart hook)                    |
-| `brain reindex [--all]`               | Rebuild `index.md` from disk (no-op if unchanged)        |
-| `brain status [--json]`               | File count, sections, orphans                            |
-| `brain init [--project] [--global]`   | Scaffold vault, write config, wire hooks, install skills |
-| `brain snapshot <dir> [-o file]`      | Concatenate `.md` files with `=== path ===` delimiters   |
-| `brain extract <dir> <output> [-b N]` | Parse JSONL conversations into batched text files        |
-| `brain list [--json]`                 | List all vault files (one per line)                      |
-| `brain skills list [--json]`          | List installed skills, flag outdated ones                |
-| `brain skills sync`                   | Sync skills from source to installed (idempotent)        |
+| Command                                | What it does                                               |
+| -------------------------------------- | ---------------------------------------------------------- |
+| `brain vault`                          | Print active vault path (pipeable)                         |
+| `brain vault --json`                   | `{ global, project, active }`                              |
+| `brain inject`                         | Print vault index (SessionStart hook)                      |
+| `brain reindex [--all]`                | Rebuild `index.md` from disk (no-op if unchanged)          |
+| `brain status [--json]`                | File count, sections, orphans                              |
+| `brain init [--project] [--global]`    | Scaffold vault, write config, wire hooks, install skills   |
+| `brain snapshot <dir> [-o file]`       | Concatenate `.md` files with `=== path ===` delimiters     |
+| `brain extract <dir> <output> [-b N]`  | Parse JSONL conversations into batched text files          |
+| `brain list [--json]`                  | List all vault files (one per line)                        |
+| `brain skills list [--json]`           | List installed skills, flag outdated ones                  |
+| `brain skills sync`                    | Sync skills from source to installed (idempotent)          |
+| `brain daemon start`                   | Install launchd jobs (reflect/ruminate/meditate)           |
+| `brain daemon stop`                    | Uninstall all daemon launchd jobs                          |
+| `brain daemon status [--json]`         | Show loaded jobs and last run times                        |
+| `brain daemon run <job>`               | Run a specific job immediately (reflect/ruminate/meditate) |
+| `brain daemon logs [--job X] [--tail]` | View daemon logs                                           |
 
 ## Vault Structure
 
@@ -130,3 +135,18 @@ Common error codes: `NOT_INITIALIZED`, `READ_FAILED`, `WRITE_FAILED`, `INDEX_MIS
 - Hooks are wired into `~/.claude/settings.json` — existing hooks preserved
 - `brain snapshot` outputs to stdout by default, use `-o` for file output
 - `brain extract` needs JSONL conversation files — typically at `~/.claude/projects/`
+
+## Daemon
+
+Automated vault maintenance via launchd. Three jobs on different cadences:
+
+| Job      | Cadence           | Model  | What                                                                |
+| -------- | ----------------- | ------ | ------------------------------------------------------------------- |
+| reflect  | Hourly            | sonnet | Extract learnings from new settled sessions into `projects/<name>/` |
+| ruminate | Weekly (Sun 3am)  | opus   | Mine session archives for missed patterns                           |
+| meditate | Monthly (1st 3am) | opus   | Audit + prune + distill vault quality                               |
+
+**State**: `~/.brain/.daemon.json` tracks processed sessions and last run times.
+**Locks**: `~/.brain/.daemon-{job}.lock` (PID-based, stale lock detection).
+**Logs**: `~/.brain/logs/daemon-{job}.log` (auto-rotated, 30 day retention).
+**Session detection**: A session is "settled" when its mtime is >30 min ago. Already-processed sessions (same mtime) are skipped.
