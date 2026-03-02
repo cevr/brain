@@ -1,5 +1,11 @@
 # @cvr/brain
 
+## 0.4.0
+
+### Minor Changes
+
+- [`4b26a63`](https://github.com/cevr/brain/commit/4b26a63fd90a7873fe10edb619e82a1f9a0ffde3) Thanks [@cevr](https://github.com/cevr)! - Add `brain skills list` and `brain skills sync` subcommands. `list` shows installed skills with outdated detection (compares against repo source). `sync` copies updated skills from source to installed location, idempotent — skips identical content. Symlink-aware: syncs to resolved symlink targets.
+
 ## 0.3.0
 
 ### Minor Changes
