@@ -34,8 +34,8 @@ export const generatePlist = (
     job === "reflect"
       ? `  <key>StartInterval</key>\n  <integer>3600</integer>`
       : job === "ruminate"
-        ? `  <key>StartCalendarInterval</key>\n  <dict>\n    <key>Weekday</key>\n    <integer>0</integer>\n    <key>Hour</key>\n    <integer>3</integer>\n  </dict>`
-        : `  <key>StartCalendarInterval</key>\n  <dict>\n    <key>Day</key>\n    <integer>1</integer>\n    <key>Hour</key>\n    <integer>3</integer>\n  </dict>`;
+        ? `  <key>StartCalendarInterval</key>\n  <dict>\n    <key>Hour</key>\n    <integer>3</integer>\n  </dict>`
+        : `  <key>StartCalendarInterval</key>\n  <dict>\n    <key>Weekday</key>\n    <integer>0</integer>\n    <key>Hour</key>\n    <integer>3</integer>\n  </dict>`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

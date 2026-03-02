@@ -37,8 +37,8 @@ const tailFlag = Flag.boolean("tail").pipe(
 
 const SCHEDULES: Record<DaemonJob, string> = {
   reflect: "every hour",
-  ruminate: "Sundays 3am",
-  meditate: "1st of month 3am",
+  ruminate: "daily 3am",
+  meditate: "Sundays 3am",
 };
 
 const relativeTime = (iso: string): string => {
