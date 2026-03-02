@@ -8,6 +8,7 @@ import { utimesSync } from "node:fs";
 import { withTempDir } from "../../helpers/index.js";
 import { scanSessions, runReflect } from "../../../src/commands/daemon/reflect.js";
 import { readState, type DaemonState } from "../../../src/commands/daemon/state.js";
+import { BrainError } from "../../../src/errors/index.js";
 import { ClaudeService, type ClaudeInvocation } from "../../../src/services/Claude.js";
 import { ConfigService } from "../../../src/services/Config.js";
 import { VaultService } from "../../../src/services/Vault.js";
@@ -54,6 +55,29 @@ const bigMessages = [
   assistantMsg("Assistant reply that is definitely long enough to pass the content length filter"),
   { type: "padding", message: { content: "x".repeat(500) } },
 ];
+
+const makeConfigLayer = (dir: string, brainDir: string) =>
+  Layer.succeed(ConfigService, {
+    globalVaultPath: () => Effect.succeed(brainDir),
+    projectVaultPath: () => Effect.succeed(Option.none()),
+    activeVaultPath: () => Effect.succeed(brainDir),
+    currentProjectName: () => Effect.succeed(Option.none()),
+    configFilePath: () => Effect.succeed(`${dir}/config.json`),
+    claudeSettingsPath: () => Effect.succeed(`${dir}/settings.json`),
+    loadConfigFile: () => Effect.succeed({}),
+    saveConfigFile: () => Effect.void,
+  });
+
+const makeTestLayers = (
+  dir: string,
+  brainDir: string,
+  invocations: Ref.Ref<Array<ClaudeInvocation>>,
+) =>
+  Layer.mergeAll(
+    makeConfigLayer(dir, brainDir),
+    VaultService.layer,
+    ClaudeService.layerTest(invocations),
+  ).pipe(Layer.provideMerge(BunServices.layer));
 
 describe("daemon reflect", () => {
   describe("scanSessions", () => {
@@ -211,52 +235,35 @@ describe("daemon reflect", () => {
   });
 
   describe("runReflect", () => {
-    it.live("invokes claude and checkpoints state", () =>
+    it.live("invokes claude with file paths and checkpoints state", () =>
       withTempDir((dir) =>
         Effect.gen(function* () {
           const origHome = process.env["HOME"];
           try {
             process.env["HOME"] = dir;
 
-            // Set up a brain vault
             const brainDir = `${dir}/.brain`;
             const fs = yield* FileSystem;
             yield* fs.makeDirectory(`${brainDir}/projects`, { recursive: true });
             yield* fs.writeFileString(`${brainDir}/index.md`, "# Brain\n");
 
-            // Set up a project with sessions
             yield* setupProjectSessions(dir, "-Users-cvr-myproject", [
               { name: "conv.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 
             const invocations = yield* Ref.make<Array<ClaudeInvocation>>([]);
-
-            const configLayer = Layer.succeed(ConfigService, {
-              globalVaultPath: () => Effect.succeed(brainDir),
-              projectVaultPath: () => Effect.succeed(Option.none()),
-              activeVaultPath: () => Effect.succeed(brainDir),
-              currentProjectName: () => Effect.succeed(Option.none()),
-              configFilePath: () => Effect.succeed(`${dir}/config.json`),
-              claudeSettingsPath: () => Effect.succeed(`${dir}/settings.json`),
-              loadConfigFile: () => Effect.succeed({}),
-              saveConfigFile: () => Effect.void,
-            });
-
-            const layers = Layer.mergeAll(
-              configLayer,
-              VaultService.layer,
-              ClaudeService.layerTest(invocations),
-            ).pipe(Layer.provideMerge(BunServices.layer));
+            const layers = makeTestLayers(dir, brainDir, invocations);
 
             yield* runReflect().pipe(Effect.provide(layers));
 
-            // Should have invoked claude
             const calls = yield* Ref.get(invocations);
             expect(calls.length).toBeGreaterThanOrEqual(1);
             expect(calls[0]?.model).toBe("sonnet");
             expect(calls[0]?.prompt).toContain("/reflect");
+            // Prompt should contain file paths, not inlined content
+            expect(calls[0]?.prompt).toContain(".jsonl");
+            expect(calls[0]?.prompt).toContain("Session files for project");
 
-            // Should have checkpointed state
             const state = yield* readState(brainDir).pipe(Effect.provide(layers));
             expect(state.reflect?.lastRun).toBeDefined();
             expect(
@@ -286,23 +293,7 @@ describe("daemon reflect", () => {
             ]);
 
             const invocations = yield* Ref.make<Array<ClaudeInvocation>>([]);
-
-            const configLayer = Layer.succeed(ConfigService, {
-              globalVaultPath: () => Effect.succeed(brainDir),
-              projectVaultPath: () => Effect.succeed(Option.none()),
-              activeVaultPath: () => Effect.succeed(brainDir),
-              currentProjectName: () => Effect.succeed(Option.none()),
-              configFilePath: () => Effect.succeed(`${dir}/config.json`),
-              claudeSettingsPath: () => Effect.succeed(`${dir}/settings.json`),
-              loadConfigFile: () => Effect.succeed({}),
-              saveConfigFile: () => Effect.void,
-            });
-
-            const layers = Layer.mergeAll(
-              configLayer,
-              VaultService.layer,
-              ClaudeService.layerTest(invocations),
-            ).pipe(Layer.provideMerge(BunServices.layer));
+            const layers = makeTestLayers(dir, brainDir, invocations);
 
             // First run
             yield* runReflect().pipe(Effect.provide(layers));
@@ -316,6 +307,109 @@ describe("daemon reflect", () => {
             yield* runReflect().pipe(Effect.provide(layers));
             const secondCalls = yield* Ref.get(invocations);
             expect(secondCalls).toHaveLength(0);
+          } finally {
+            process.env["HOME"] = origHome;
+          }
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("releases lock even when claude fails", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const origHome = process.env["HOME"];
+          try {
+            process.env["HOME"] = dir;
+
+            const brainDir = `${dir}/.brain`;
+            const fs = yield* FileSystem;
+            yield* fs.makeDirectory(`${brainDir}/projects`, { recursive: true });
+            yield* fs.writeFileString(`${brainDir}/index.md`, "# Brain\n");
+
+            yield* setupProjectSessions(dir, "-Users-cvr-locktest", [
+              { name: "conv.jsonl", mtime: oldDate, messages: bigMessages },
+            ]);
+
+            // Claude layer that always fails
+            const failingClaude = Layer.succeed(ClaudeService, {
+              invoke: () =>
+                Effect.fail(new BrainError({ message: "Claude crashed", code: "SPAWN_FAILED" })),
+            });
+
+            const layers = Layer.mergeAll(
+              makeConfigLayer(dir, brainDir),
+              VaultService.layer,
+              failingClaude,
+            ).pipe(Layer.provideMerge(BunServices.layer));
+
+            // Should not throw — error is caught per-group
+            yield* runReflect().pipe(Effect.provide(layers));
+
+            // Lock should be released
+            const lockPath = `${brainDir}/.daemon-reflect.lock`;
+            const lockExists = yield* fs
+              .exists(lockPath)
+              .pipe(Effect.catch(() => Effect.succeed(false)));
+            expect(lockExists).toBe(false);
+          } finally {
+            process.env["HOME"] = origHome;
+          }
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("continues to next group when one fails", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const origHome = process.env["HOME"];
+          try {
+            process.env["HOME"] = dir;
+
+            const brainDir = `${dir}/.brain`;
+            const fs = yield* FileSystem;
+            yield* fs.makeDirectory(`${brainDir}/projects`, { recursive: true });
+            yield* fs.writeFileString(`${brainDir}/index.md`, "# Brain\n");
+
+            // Two projects
+            yield* setupProjectSessions(dir, "-Users-cvr-project-fail", [
+              { name: "s1.jsonl", mtime: oldDate, messages: bigMessages },
+            ]);
+            yield* setupProjectSessions(dir, "-Users-cvr-project-succeed", [
+              { name: "s2.jsonl", mtime: oldDate, messages: bigMessages },
+            ]);
+
+            let callCount = 0;
+            // Claude that fails on first invocation, succeeds on second
+            const flakyClaudeLayer = Layer.succeed(ClaudeService, {
+              invoke: () =>
+                Effect.suspend(() => {
+                  callCount++;
+                  if (callCount === 1) {
+                    return Effect.fail(
+                      new BrainError({ message: "First call fails", code: "SPAWN_FAILED" }),
+                    );
+                  }
+                  return Effect.void;
+                }),
+            });
+
+            const layers = Layer.mergeAll(
+              makeConfigLayer(dir, brainDir),
+              VaultService.layer,
+              flakyClaudeLayer,
+            ).pipe(Layer.provideMerge(BunServices.layer));
+
+            yield* runReflect().pipe(Effect.provide(layers));
+
+            // Should have called claude twice (once per group)
+            expect(callCount).toBe(2);
+
+            // The succeeding group's sessions should be checkpointed
+            const state = yield* readState(brainDir).pipe(Effect.provide(layers));
+            const processed = state.reflect?.processedSessions ?? {};
+            // One group succeeded, one failed — at least one session should be checkpointed
+            const processedKeys = Object.keys(processed);
+            expect(processedKeys.length).toBeGreaterThanOrEqual(1);
           } finally {
             process.env["HOME"] = origHome;
           }

@@ -9,6 +9,7 @@ import {
   writeState,
   acquireLock,
   releaseLock,
+  lockExists,
   isSettled,
   deriveProjectName,
 } from "../../../src/commands/daemon/state.js";
@@ -114,6 +115,20 @@ describe("daemon state", () => {
           const exit = yield* acquireLock(dir, "reflect").pipe(Effect.exit);
 
           expect(exit._tag).toBe("Failure");
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("lockExists reports correct state", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          expect(yield* lockExists(dir, "reflect")).toBe(false);
+
+          yield* acquireLock(dir, "reflect");
+          expect(yield* lockExists(dir, "reflect")).toBe(true);
+
+          yield* releaseLock(dir, "reflect");
+          expect(yield* lockExists(dir, "reflect")).toBe(false);
         }),
       ).pipe(Effect.provide(TestLayer)),
     );
