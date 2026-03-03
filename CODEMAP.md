@@ -23,13 +23,14 @@ src/
 │   ├── list.ts          # List vault files
 │   ├── snapshot.ts      # Concatenate .md files
 │   ├── extract.ts       # Parse JSONL conversations
-│   ├── daemon.ts        # Daemon parent command + subcommands (start/stop/status/run/logs)
+│   ├── daemon.ts        # Daemon parent command + subcommands (start/stop/status/run/tick/logs)
 │   └── daemon/
+│       ├── schedule.ts  # Pure resolveJob({day,hour}) dispatch — no Effect deps
 │       ├── state.ts     # DaemonState schema, read/write, lockfiles, requireHome, requireDarwin, deriveProjectName
-│       ├── reflect.ts   # Hourly: scan sessions, pass file paths to Claude /reflect per project
-│       ├── ruminate.ts  # Weekly: invoke /ruminate
-│       ├── meditate.ts  # Monthly: invoke /meditate
-│       └── launchd.ts   # Plist generation, install/uninstall, isLoaded, log rotation
+│       ├── reflect.ts   # Reflect: scan sessions, pass file paths to Claude /reflect per project
+│       ├── ruminate.ts  # Ruminate: invoke /ruminate
+│       ├── meditate.ts  # Meditate: invoke /meditate
+│       └── launchd.ts   # Unified plist generation, install/uninstall, legacy migration, log rotation
 scripts/
 └── build.ts             # Bun.build with compile-time defines → bin/brain
 starter/

@@ -10,12 +10,14 @@ import { runRuminate } from "./daemon/ruminate.js";
 import { runMeditate } from "./daemon/meditate.js";
 import {
   ALL_JOBS,
-  installPlist,
-  uninstallPlist,
-  isLoaded,
+  installUnifiedPlist,
+  uninstallUnifiedPlist,
+  uninstallLegacyPlists,
+  isUnifiedLoaded,
   rotateLogs,
   type DaemonJob,
 } from "./daemon/launchd.js";
+import { resolveJob, type TickInput } from "./daemon/schedule.js";
 
 const jsonFlag = Flag.boolean("json").pipe(Flag.withDescription("Output as JSON"));
 
@@ -35,11 +37,7 @@ const tailFlag = Flag.boolean("tail").pipe(
 
 // --- Helpers ---
 
-const SCHEDULES: Record<DaemonJob, string> = {
-  reflect: "every hour",
-  ruminate: "daily 3am",
-  meditate: "Sundays 3am",
-};
+const UNIFIED_SCHEDULE = "9am, 1pm, 5pm, 9pm Sun-Thu";
 
 const relativeTime = (iso: string): string => {
   const diff = Date.now() - new Date(iso).getTime();
@@ -56,34 +54,35 @@ const relativeTime = (iso: string): string => {
 // --- Subcommands ---
 
 const start = Command.make("start", { json: jsonFlag }).pipe(
-  Command.withDescription("Install and start all daemon jobs"),
+  Command.withDescription("Install and start the daemon scheduler"),
   Command.withHandler(({ json }) =>
     Effect.gen(function* () {
-      for (const job of ALL_JOBS) {
-        yield* installPlist(job);
-        if (!json) yield* Console.error(`  Installed ${job}`);
-      }
+      yield* uninstallLegacyPlists();
+      if (!json) yield* Console.error("  Cleaned up legacy per-job plists");
+
+      yield* installUnifiedPlist();
+      if (!json) yield* Console.error("  Installed unified scheduler");
+
       if (json) {
         // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
-        yield* Console.log(JSON.stringify({ jobs: [...ALL_JOBS], status: "started" }));
+        yield* Console.log(JSON.stringify({ schedule: UNIFIED_SCHEDULE, status: "started" }));
       } else {
-        yield* Console.error("\nDaemon started — 3 jobs scheduled");
+        yield* Console.error(`\nDaemon started — ${UNIFIED_SCHEDULE}`);
       }
     }),
   ),
 );
 
 const stop = Command.make("stop", { json: jsonFlag }).pipe(
-  Command.withDescription("Stop and uninstall all daemon jobs"),
+  Command.withDescription("Stop and uninstall the daemon scheduler"),
   Command.withHandler(({ json }) =>
     Effect.gen(function* () {
-      for (const job of ALL_JOBS) {
-        yield* uninstallPlist(job);
-        if (!json) yield* Console.error(`  Removed ${job}`);
-      }
+      yield* uninstallUnifiedPlist();
+      yield* uninstallLegacyPlists();
+
       if (json) {
         // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
-        yield* Console.log(JSON.stringify({ jobs: [...ALL_JOBS], status: "stopped" }));
+        yield* Console.log(JSON.stringify({ status: "stopped" }));
       } else {
         yield* Console.error("\nDaemon stopped");
       }
@@ -98,41 +97,32 @@ const status = Command.make("status", { json: jsonFlag }).pipe(
       const config = yield* ConfigService;
       const brainDir = yield* config.globalVaultPath();
       const state = yield* readState(brainDir);
-
+      const loaded = yield* isUnifiedLoaded();
       const processedCount = Object.keys(state.reflect?.processedSessions ?? {}).length;
 
-      const jobs: Array<{
-        name: string;
-        loaded: boolean;
-        lastRun: string | null;
-        schedule: string;
-        locked: boolean;
-      }> = [];
-
+      const jobs: Array<{ name: string; lastRun: string | null; locked: boolean }> = [];
       for (const job of ALL_JOBS) {
-        const loaded = yield* isLoaded(job);
         const locked = yield* lockExists(brainDir, job);
-        const jobState = state[job];
-        jobs.push({
-          name: job,
-          loaded,
-          lastRun: jobState?.lastRun ?? null,
-          schedule: SCHEDULES[job],
-          locked,
-        });
+        jobs.push({ name: job, lastRun: state[job]?.lastRun ?? null, locked });
       }
 
       if (json) {
         // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
-        yield* Console.log(JSON.stringify({ jobs, processedSessions: processedCount }));
+        yield* Console.log(
+          JSON.stringify({
+            loaded,
+            schedule: UNIFIED_SCHEDULE,
+            jobs,
+            processedSessions: processedCount,
+          }),
+        );
       } else {
+        yield* Console.log(`Scheduler: ${loaded ? "loaded" : "not loaded"} (${UNIFIED_SCHEDULE})`);
+        yield* Console.log("");
         for (const j of jobs) {
-          const loadedStr = j.loaded ? "loaded" : "not loaded";
           const lastRunStr = j.lastRun !== null ? relativeTime(j.lastRun) : "never";
           const lockStr = j.locked ? " [LOCKED]" : "";
-          yield* Console.log(
-            `${j.name}: ${loadedStr}, last run: ${lastRunStr}, schedule: ${j.schedule}${lockStr}`,
-          );
+          yield* Console.log(`  ${j.name}: last run ${lastRunStr}${lockStr}`);
         }
         if (processedCount > 0) {
           yield* Console.log(`\nProcessed sessions: ${String(processedCount)}`);
@@ -178,6 +168,48 @@ const run = Command.make("run", { job: jobArg, json: jsonFlag }).pipe(
   ),
 );
 
+const tick = Command.make("tick", { json: jsonFlag }).pipe(
+  Command.withDescription("Scheduler tick — dispatches the appropriate job based on current time"),
+  Command.withHandler(({ json }) =>
+    Effect.gen(function* () {
+      const now = new Date();
+      const input: TickInput = { day: now.getDay(), hour: now.getHours() };
+      const job = resolveJob(input);
+
+      if (job === null) {
+        if (json) {
+          // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
+          yield* Console.log(JSON.stringify({ job: null, status: "skipped" }));
+        } else {
+          yield* Console.error("No job scheduled for this timeslot");
+        }
+        return;
+      }
+
+      if (!json) yield* Console.error(`Tick resolved to: ${job}`);
+
+      yield* rotateLogs();
+
+      switch (job) {
+        case "reflect":
+          yield* runReflect();
+          break;
+        case "ruminate":
+          yield* runRuminate();
+          break;
+        case "meditate":
+          yield* runMeditate();
+          break;
+      }
+
+      if (json) {
+        // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
+        yield* Console.log(JSON.stringify({ job, status: "completed" }));
+      }
+    }),
+  ),
+);
+
 const logs = Command.make("logs", { job: logsJobArg, tail: tailFlag }).pipe(
   Command.withDescription("View daemon logs"),
   Command.withHandler(({ job, tail }) =>
@@ -197,10 +229,10 @@ const logs = Command.make("logs", { job: logsJobArg, tail: tailFlag }).pipe(
         .readDirectory(logsDir)
         .pipe(Effect.catch(() => Effect.succeed([] as string[])));
       const logFiles = files
-        .filter((f) => f.startsWith("daemon-") && f.endsWith(".log"))
+        .filter((f) => (f === "daemon.log" || f.startsWith("daemon-")) && f.endsWith(".log"))
         .filter((f) => {
           if (job === undefined) return true;
-          return f === `daemon-${job}.log`;
+          return f === `daemon-${job}.log` || f === "daemon.log";
         })
         .sort();
 
@@ -244,4 +276,6 @@ const daemonRoot = Command.make("daemon").pipe(
   Command.withDescription("Automated vault maintenance scheduler"),
 );
 
-export const daemon = daemonRoot.pipe(Command.withSubcommands([start, stop, status, run, logs]));
+export const daemon = daemonRoot.pipe(
+  Command.withSubcommands([start, stop, status, run, tick, logs]),
+);
