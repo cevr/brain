@@ -1,5 +1,13 @@
 # @cvr/brain
 
+## 0.5.0
+
+### Minor Changes
+
+- [`3d1e3a5`](https://github.com/cevr/brain/commit/3d1e3a50727902b6195be3ca4db3785b4ef2d8f6) Thanks [@cevr](https://github.com/cevr)! - Add `brain daemon` for automated vault maintenance via launchd. Three scheduled jobs: `reflect` (hourly, extracts learnings from settled sessions), `ruminate` (weekly, mines archives for missed patterns), `meditate` (monthly, audits vault quality). Subcommands: `start`, `stop`, `status`, `run <job>`, `logs`. Includes `ClaudeService` for testable skill invocation, PID-based lockfiles, atomic state checkpointing, and log rotation.
+
+- [`602be1c`](https://github.com/cevr/brain/commit/602be1c0c379062f9a34a994f2306effcf412a95) Thanks [@cevr](https://github.com/cevr)! - Collapse 3 separate launchd daemon plists into 1 unified scheduler. `brain daemon tick` dispatches the right job (reflect/ruminate/meditate) based on day and hour. Schedule: 9am, 1pm, 5pm, 9pm Sun-Thu; Fri/Sat skip. Meditate weekly (Sun 9am), ruminate daily (Mon-Thu 9am), reflect at all other slots. `brain daemon start` auto-migrates from legacy per-job plists.
+
 ## 0.4.0
 
 ### Minor Changes
