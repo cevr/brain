@@ -15,6 +15,14 @@ import { VaultService } from "../../../src/services/Vault.js";
 
 const TestLayer = BunServices.layer;
 
+// Dashify: `/foo/bar` → `-foo-bar`, `/.hidden` → `--hidden`
+const dashify = (p: string) => p.replaceAll("/.", "--").replaceAll("/", "-");
+
+// Build a Claude-style dashified dir name from a temp dir + project name.
+// deriveProjectName will find `parentDir` as an existing prefix → returns `projectName`.
+const fakeDirName = (parentDir: string, projectName: string) =>
+  `${dashify(parentDir)}-${projectName}`;
+
 // Helper: create a JSONL file with lines
 const writeJsonl = (fs: FileSystem, filePath: string, lines: Record<string, unknown>[]) =>
   fs.writeFileString(filePath, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
@@ -87,8 +95,9 @@ describe("daemon reflect", () => {
           const origHome = process.env["HOME"];
           try {
             process.env["HOME"] = dir;
+            const dn = fakeDirName(dir, "project-alpha");
 
-            yield* setupProjectSessions(dir, "-Users-cvr-project-alpha", [
+            yield* setupProjectSessions(dir, dn, [
               { name: "session1.jsonl", mtime: oldDate, messages: bigMessages },
               { name: "session2.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
@@ -111,8 +120,9 @@ describe("daemon reflect", () => {
           const origHome = process.env["HOME"];
           try {
             process.env["HOME"] = dir;
+            const dn = fakeDirName(dir, "project-beta");
 
-            yield* setupProjectSessions(dir, "-Users-cvr-project-beta", [
+            yield* setupProjectSessions(dir, dn, [
               { name: "active.jsonl", mtime: recentDate, messages: bigMessages },
               { name: "settled.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
@@ -135,15 +145,16 @@ describe("daemon reflect", () => {
           const origHome = process.env["HOME"];
           try {
             process.env["HOME"] = dir;
+            const dn = fakeDirName(dir, "project-gamma");
 
-            yield* setupProjectSessions(dir, "-Users-cvr-project-gamma", [
+            yield* setupProjectSessions(dir, dn, [
               { name: "done.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 
             const state: DaemonState = {
               reflect: {
                 processedSessions: {
-                  "-Users-cvr-project-gamma/done.jsonl": oldDate.toISOString(),
+                  [`${dn}/done.jsonl`]: oldDate.toISOString(),
                 },
               },
               ruminate: {},
@@ -165,16 +176,16 @@ describe("daemon reflect", () => {
           const origHome = process.env["HOME"];
           try {
             process.env["HOME"] = dir;
+            const dn = fakeDirName(dir, "project-delta");
 
-            yield* setupProjectSessions(dir, "-Users-cvr-project-delta", [
+            yield* setupProjectSessions(dir, dn, [
               { name: "changed.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 
             const state: DaemonState = {
               reflect: {
                 processedSessions: {
-                  // Recorded with a different mtime
-                  "-Users-cvr-project-delta/changed.jsonl": "2024-01-01T00:00:00.000Z",
+                  [`${dn}/changed.jsonl`]: "2024-01-01T00:00:00.000Z",
                 },
               },
               ruminate: {},
@@ -214,10 +225,10 @@ describe("daemon reflect", () => {
           try {
             process.env["HOME"] = dir;
 
-            yield* setupProjectSessions(dir, "-Users-cvr-project-one", [
+            yield* setupProjectSessions(dir, fakeDirName(dir, "project-one"), [
               { name: "s1.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
-            yield* setupProjectSessions(dir, "-Users-cvr-project-two", [
+            yield* setupProjectSessions(dir, fakeDirName(dir, "project-two"), [
               { name: "s2.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 
@@ -241,13 +252,14 @@ describe("daemon reflect", () => {
           const origHome = process.env["HOME"];
           try {
             process.env["HOME"] = dir;
+            const dn = fakeDirName(dir, "myproject");
 
             const brainDir = `${dir}/.brain`;
             const fs = yield* FileSystem;
             yield* fs.makeDirectory(`${brainDir}/projects`, { recursive: true });
             yield* fs.writeFileString(`${brainDir}/index.md`, "# Brain\n");
 
-            yield* setupProjectSessions(dir, "-Users-cvr-myproject", [
+            yield* setupProjectSessions(dir, dn, [
               { name: "conv.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 
@@ -260,15 +272,12 @@ describe("daemon reflect", () => {
             expect(calls.length).toBeGreaterThanOrEqual(1);
             expect(calls[0]?.model).toBe("sonnet");
             expect(calls[0]?.prompt).toContain("/reflect");
-            // Prompt should contain file paths, not inlined content
             expect(calls[0]?.prompt).toContain(".jsonl");
             expect(calls[0]?.prompt).toContain("Session files for project");
 
             const state = yield* readState(brainDir).pipe(Effect.provide(layers));
             expect(state.reflect?.lastRun).toBeDefined();
-            expect(
-              state.reflect?.processedSessions?.["-Users-cvr-myproject/conv.jsonl"],
-            ).toBeDefined();
+            expect(state.reflect?.processedSessions?.[`${dn}/conv.jsonl`]).toBeDefined();
           } finally {
             process.env["HOME"] = origHome;
           }
@@ -288,7 +297,7 @@ describe("daemon reflect", () => {
             yield* fs.makeDirectory(`${brainDir}/projects`, { recursive: true });
             yield* fs.writeFileString(`${brainDir}/index.md`, "# Brain\n");
 
-            yield* setupProjectSessions(dir, "-Users-cvr-idempotent", [
+            yield* setupProjectSessions(dir, fakeDirName(dir, "idempotent"), [
               { name: "conv.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 
@@ -326,7 +335,7 @@ describe("daemon reflect", () => {
             yield* fs.makeDirectory(`${brainDir}/projects`, { recursive: true });
             yield* fs.writeFileString(`${brainDir}/index.md`, "# Brain\n");
 
-            yield* setupProjectSessions(dir, "-Users-cvr-locktest", [
+            yield* setupProjectSessions(dir, fakeDirName(dir, "locktest"), [
               { name: "conv.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 
@@ -371,10 +380,10 @@ describe("daemon reflect", () => {
             yield* fs.writeFileString(`${brainDir}/index.md`, "# Brain\n");
 
             // Two projects
-            yield* setupProjectSessions(dir, "-Users-cvr-project-fail", [
+            yield* setupProjectSessions(dir, fakeDirName(dir, "project-fail"), [
               { name: "s1.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
-            yield* setupProjectSessions(dir, "-Users-cvr-project-succeed", [
+            yield* setupProjectSessions(dir, fakeDirName(dir, "project-succeed"), [
               { name: "s2.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 

@@ -157,33 +157,39 @@ describe("daemon state", () => {
   });
 
   describe("deriveProjectName", () => {
+    // Dashify: `/foo/bar` → `-foo-bar`, `/.hidden` → `--hidden`
+    const dashify = (p: string) => p.replaceAll("/.", "--").replaceAll("/", "-");
+
     it.live("resolves project name from real path on disk", () =>
       withTempDir((dir) =>
         Effect.gen(function* () {
           const fs = yield* FileSystem;
-          // Create: /tmp/xxx/Users/cvr/Developer/personal/brain
-          yield* fs.makeDirectory(`${dir}/Users/cvr/Developer/personal/brain`, { recursive: true });
-          // Dashified: -<dir>-Users-cvr-Developer-personal-brain
-          // But we can't use the temp dir prefix. Instead, test with the real /Users path.
-          // The real /Users/cvr/Developer/personal exists on the test machine,
-          // so test the full decode path → basename approach.
-          const name = yield* deriveProjectName("-Users-cvr-Developer-personal-brain");
+          // Create a nested dir inside temp so deriveProjectName can find it
+          yield* fs.makeDirectory(`${dir}/Developer/personal/brain`, { recursive: true });
+          const dirName = dashify(`${dir}/Developer/personal`) + "-brain";
+          const name = yield* deriveProjectName(dirName);
           expect(name).toBe("brain");
         }),
       ).pipe(Effect.provide(TestLayer)),
     );
 
     it.live("preserves internal dashes in multi-word project names", () =>
-      Effect.gen(function* () {
-        // Walk right-to-left: finds /Users/cvr as existing dir, returns suffix
-        const name = yield* deriveProjectName("-Users-cvr-my-cool-project");
-        expect(name).toBe("my-cool-project");
-      }).pipe(Effect.provide(TestLayer)),
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          yield* fs.makeDirectory(`${dir}/workspace`, { recursive: true });
+          // Dashified: <tempdir>-workspace-my-cool-project
+          // Walk right-to-left finds <tempdir>/workspace as existing → suffix is "my-cool-project"
+          const dirName = dashify(`${dir}/workspace`) + "-my-cool-project";
+          const name = yield* deriveProjectName(dirName);
+          expect(name).toBe("my-cool-project");
+        }),
+      ).pipe(Effect.provide(TestLayer)),
     );
 
     it.live("falls back to last segment when no path resolves", () =>
       Effect.gen(function* () {
-        const name = yield* deriveProjectName("my-project");
+        const name = yield* deriveProjectName("nonexistent-project");
         expect(name).toBe("project");
       }).pipe(Effect.provide(TestLayer)),
     );
