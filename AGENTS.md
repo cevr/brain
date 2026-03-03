@@ -35,7 +35,7 @@ bun run test          # bun test
 - **Daemon state**: `~/.brain/.daemon.json` tracks processed sessions and last run times. Lockfiles at `~/.brain/.daemon-{job}.lock`
 - **Daemon reflect**: passes file paths (not inlined transcripts) to Claude. Max 2000 lines across all sessions per group
 - **Daemon migration**: `brain daemon start` auto-removes legacy per-job plists (`com.cvr.brain-daemon-{reflect,ruminate,meditate}`)
-- **`deriveProjectName`**: resolves dashified dir names back to real paths on disk via `fs.exists`, takes `path.basename`. Effectful (`Effect.fn`)
+- **`deriveProjectName`**: resolves dashified dir names by probing `fs.exists` right-to-left, but **skips TCC-protected dirs** (Downloads, Documents, Photos, etc.) to avoid macOS permission popups. Falls back to `$HOME` match or last segment
 - **Error codes**: `NO_HOME` (HOME unset), `UNSUPPORTED_PLATFORM` (non-macOS), `LOCKED` (job already running)
 
 ## For Related Docs

@@ -193,6 +193,30 @@ export const requireDarwin = Effect.fn("requireDarwin")(function* () {
 export const isSettled = (mtime: Date): boolean => Date.now() - mtime.getTime() > SETTLE_MS;
 
 /**
+ * macOS TCC-protected directories — `fs.exists()` on these triggers
+ * permission popups (Photos, Network, etc). We skip probing any path
+ * that resolves to one of these.
+ */
+const TCC_DIRS = new Set([
+  "Desktop",
+  "Documents",
+  "Downloads",
+  "Movies",
+  "Music",
+  "Pictures",
+  "Library",
+  "Public",
+]);
+
+const isTccProtected = (candidate: string): boolean => {
+  const home = process.env["HOME"] ?? "";
+  if (home.length === 0 || !candidate.startsWith(home + "/")) return false;
+  const rel = candidate.slice(home.length + 1);
+  const topDir = rel.split("/")[0] ?? "";
+  return TCC_DIRS.has(topDir);
+};
+
+/**
  * Derive a project name from a Claude projects dir name.
  * Claude uses dashified absolute paths: `-Users-cvr-Developer-personal-brain`
  *
@@ -200,6 +224,9 @@ export const isSettled = (mtime: Date): boolean => Date.now() - mtime.getTime() 
  * We reverse the dashification by trying candidate paths (replacing `-` with `/`)
  * from right to left, checking which exists on disk. The basename of the first
  * match is the project name. Falls back to the last dash-delimited segment.
+ *
+ * Skips probing macOS TCC-protected directories (Downloads, Photos, etc.)
+ * to avoid permission popups when run as a daemon.
  */
 export const deriveProjectName = Effect.fn("deriveProjectName")(function* (dirName: string) {
   if (dirName.length <= 1) return dirName;
@@ -211,8 +238,10 @@ export const deriveProjectName = Effect.fn("deriveProjectName")(function* (dirNa
   const decoded = dirName.replaceAll("--", "/.").replaceAll("-", "/");
 
   // Check if the fully-decoded path exists — if so, just use basename
-  const fullExists = yield* fs.exists(decoded).pipe(Effect.catch(() => Effect.succeed(false)));
-  if (fullExists) return p.basename(decoded);
+  if (!isTccProtected(decoded)) {
+    const fullExists = yield* fs.exists(decoded).pipe(Effect.catch(() => Effect.succeed(false)));
+    if (fullExists) return p.basename(decoded);
+  }
 
   // Walk dashes right-to-left, trying each split as path separator
   // This finds the longest suffix that's a real directory name
@@ -224,6 +253,7 @@ export const deriveProjectName = Effect.fn("deriveProjectName")(function* (dirNa
   for (const idx of dashes) {
     const prefix = dirName.slice(0, idx);
     const candidate = prefix.replaceAll("--", "/.").replaceAll("-", "/");
+    if (isTccProtected(candidate)) continue;
     const exists = yield* fs.exists(candidate).pipe(Effect.catch(() => Effect.succeed(false)));
     if (exists) {
       // Everything after this dash is the project name

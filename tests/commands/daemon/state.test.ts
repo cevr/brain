@@ -214,5 +214,17 @@ describe("daemon state", () => {
         expect(name).toBe("-");
       }).pipe(Effect.provide(TestLayer)),
     );
+
+    it.live("skips TCC-protected dirs (Downloads, Photos, etc.)", () =>
+      Effect.gen(function* () {
+        // This would trigger macOS permission popup if we probed ~/Downloads
+        // Instead it skips that probe and finds ~/Users/cvr as the match
+        const home = process.env["HOME"] ?? "";
+        const dirName = dashify(`${home}/Downloads`) + "-prophecy-studies";
+        const name = yield* deriveProjectName(dirName);
+        // ~/Downloads is TCC-protected → skipped. Falls back to ~/Users/cvr match
+        expect(name).toBe("Downloads-prophecy-studies");
+      }).pipe(Effect.provide(TestLayer)),
+    );
   });
 });
