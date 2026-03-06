@@ -1,5 +1,19 @@
 # @cvr/brain
 
+## 0.6.0
+
+### Minor Changes
+
+- [`87ae32d`](https://github.com/cevr/brain/commit/87ae32de5fc36360e564ffd8e8ebbe38d52de0be) Thanks [@cevr](https://github.com/cevr)! - Add Codex as a supported provider alongside Claude.
+
+  The CLI can now configure and manage provider-specific integrations for Claude and Codex, and daemon jobs can scan session archives from both providers while executing with one selected provider. This also adds provider-aware daemon state, Codex transcript extraction support, and daemon provider selection flags.
+
+### Patch Changes
+
+- [`b66d507`](https://github.com/cevr/brain/commit/b66d507b1e9484601822f78e40e8730da232ed31) Thanks [@cevr](https://github.com/cevr)! - fix: skip TCC-protected directories in deriveProjectName to prevent macOS permission popups
+
+  The daemon's `deriveProjectName` called `fs.exists()` on reconstructed path candidates, hitting macOS TCC-protected directories (Downloads, Documents, Photos, etc.) and triggering system permission popups. Now skips probing any path under known TCC-protected `$HOME` subdirectories.
+
 ## 0.5.0
 
 ### Minor Changes
