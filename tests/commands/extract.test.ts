@@ -86,6 +86,64 @@ describe("extract", () => {
         }),
       ).pipe(Effect.provide(TestLayer)),
     );
+
+    it.live("parses codex response_item messages", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          const inputDir = `${dir}/input`;
+          const outputDir = `${dir}/output`;
+          yield* fs.makeDirectory(inputDir, { recursive: true });
+
+          yield* writeJsonl(fs, `${inputDir}/conv1.jsonl`, [
+            {
+              type: "session_meta",
+              payload: { cwd: "/Users/cvr/Developer/personal/brain" },
+            },
+            {
+              type: "response_item",
+              payload: {
+                type: "message",
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "Codex user message that is long enough to pass the parser threshold",
+                  },
+                ],
+              },
+            },
+            {
+              type: "response_item",
+              payload: {
+                type: "message",
+                role: "assistant",
+                content: [
+                  {
+                    type: "output_text",
+                    text: "Codex assistant response that is also long enough to keep",
+                  },
+                ],
+              },
+            },
+            {
+              type: "event_msg",
+              payload: { type: "task_started" },
+            },
+            { type: "padding", payload: { text: "x".repeat(500) } },
+          ]);
+
+          const result = yield* extractConversations(inputDir, outputDir, {
+            provider: "codex",
+          });
+
+          expect(result.conversations).toHaveLength(1);
+          expect(result.conversations[0]!.messages).toHaveLength(2);
+          expect(result.conversations[0]!.messages[0]!.role).toBe("user");
+          expect(result.conversations[0]!.messages[1]!.role).toBe("assistant");
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
   });
 
   describe("filtering", () => {

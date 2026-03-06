@@ -1,19 +1,36 @@
-import { Console, Effect } from "effect";
-import { ClaudeService } from "../../services/Claude.js";
+import { Console, Effect, Option } from "effect";
+import { AgentPlatformService, type AgentProviderId } from "../../services/AgentPlatform.js";
 import { ConfigService } from "../../services/Config.js";
 import { acquireLock, readState, releaseLock, writeState } from "./state.js";
 
+interface RunMeditateOptions {
+  readonly executorProvider?: AgentProviderId;
+}
+
+const buildMeditatePrompt = (brainDir: string): string =>
+  [
+    "You are running the brain meditate daemon.",
+    `Brain vault: ${brainDir}`,
+    "",
+    "Audit the vault quality. Prune low-value notes, merge overlap, tighten principles, and improve structure.",
+    "Prefer reduction over growth.",
+  ].join("\n");
+
 /** Run the meditate daemon job — audits, prunes, and distills vault quality */
-export const runMeditate = Effect.fn("runMeditate")(function* () {
+export const runMeditate = Effect.fn("runMeditate")(function* (opts: RunMeditateOptions = {}) {
   const config = yield* ConfigService;
-  const claude = yield* ClaudeService;
+  const platform = yield* AgentPlatformService;
   const brainDir = yield* config.globalVaultPath();
+  const executorId = yield* platform.resolveDaemonExecutor(
+    opts.executorProvider === undefined ? undefined : Option.some(opts.executorProvider),
+  );
+  const executor = yield* platform.getProvider(executorId);
 
   yield* acquireLock(brainDir, "meditate");
 
   yield* Effect.gen(function* () {
-    yield* Console.error("Meditating...");
-    yield* claude.invoke("/meditate", "opus");
+    yield* Console.error(`Meditating with ${executorId}...`);
+    yield* executor.invoke(buildMeditatePrompt(brainDir), "deep", brainDir);
 
     const state = yield* readState(brainDir);
     yield* writeState(brainDir, {

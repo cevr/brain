@@ -119,14 +119,33 @@ describe("ConfigService", () => {
     });
   });
 
-  describe("claudeSettingsPath", () => {
-    it.live("returns ~/.claude/settings.json", () =>
+  describe("defaultProvider", () => {
+    it.live("returns None when provider is unset", () =>
       Effect.gen(function* () {
         const config = yield* ConfigService;
-        const result = yield* config.claudeSettingsPath();
-        const home = process.env["HOME"] ?? process.env["USERPROFILE"];
-        expect(result).toBe(`${home}/.claude/settings.json`);
+        const result = yield* config.defaultProvider();
+        expect(Option.isNone(result)).toBe(true);
       }).pipe(Effect.provide(makeTestLayer())),
+    );
+
+    it.live("returns config defaultProvider when set", () =>
+      Effect.gen(function* () {
+        const config = yield* ConfigService;
+        const result = yield* config.defaultProvider();
+        expect(Option.isSome(result)).toBe(true);
+        if (Option.isSome(result)) {
+          expect(result.value).toBe("codex");
+        }
+      }).pipe(
+        Effect.provide(
+          makeTestLayer({
+            exists: () => Effect.succeed(true),
+            readFileString: () => Effect.succeed(JSON.stringify({ defaultProvider: "codex" })),
+            writeFileString: () => Effect.void,
+            makeDirectory: () => Effect.void,
+          }),
+        ),
+      ),
     );
   });
 

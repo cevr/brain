@@ -1,37 +1,114 @@
+/** @effect-diagnostics effect/preferSchemaOverJson:skip-file */
 import { writeFileSync } from "node:fs";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import { BrainError } from "../../errors/index.js";
+import type { AgentProviderId } from "../../services/AgentPlatform.js";
 
-// --- Schemas ---
+export type ProviderMap<T> = Partial<Record<AgentProviderId, T>>;
 
-const JobState = Schema.Struct({
-  lastRun: Schema.optional(Schema.String),
-});
+export interface ReflectState {
+  readonly lastSourceScanByProvider?: ProviderMap<string>;
+  readonly lastExecutorRun?: string;
+  readonly processedSessionsByProvider?: ProviderMap<Record<string, string>>;
+}
 
-const ReflectState = Schema.Struct({
-  lastRun: Schema.optional(Schema.String),
-  processedSessions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-});
+export interface JobState {
+  readonly lastRun?: string;
+}
 
-const DaemonStateSchema = Schema.Struct({
-  reflect: Schema.optional(ReflectState),
-  ruminate: Schema.optional(JobState),
-  meditate: Schema.optional(JobState),
-});
+export interface DaemonState {
+  readonly reflect?: ReflectState;
+  readonly ruminate?: JobState;
+  readonly meditate?: JobState;
+}
 
-export type DaemonState = typeof DaemonStateSchema.Type;
-
-const DaemonStateJson = Schema.fromJsonString(DaemonStateSchema);
-const decodeDaemonState = Schema.decodeUnknownEffect(DaemonStateJson);
-const encodeDaemonState = Schema.encodeEffect(DaemonStateJson);
+const EMPTY_STATE: DaemonState = { reflect: {}, ruminate: {}, meditate: {} };
 
 // --- Constants ---
 
 const SETTLE_MS = 30 * 60 * 1000; // 30 minutes
 const STATE_FILE = ".daemon.json";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const pickProviderMap = (value: unknown): ProviderMap<string> => {
+  if (!isRecord(value)) return {};
+  const result: ProviderMap<string> = {};
+  for (const provider of ["claude", "codex"] as const) {
+    const candidate = value[provider];
+    if (typeof candidate === "string") result[provider] = candidate;
+  }
+  return result;
+};
+
+const pickProcessedSessionsByProvider = (value: unknown): ProviderMap<Record<string, string>> => {
+  if (!isRecord(value)) return {};
+  const result: ProviderMap<Record<string, string>> = {};
+  for (const provider of ["claude", "codex"] as const) {
+    const candidate = value[provider];
+    if (!isRecord(candidate)) continue;
+    const entries = Object.entries(candidate).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    );
+    result[provider] = Object.fromEntries(entries);
+  }
+  return result;
+};
+
+const normalizeReflectState = (value: unknown): ReflectState => {
+  if (!isRecord(value)) return {};
+
+  const lastSourceScanByProvider = pickProviderMap(value["lastSourceScanByProvider"]);
+  const processedSessionsByProvider = pickProcessedSessionsByProvider(
+    value["processedSessionsByProvider"],
+  );
+  const lastExecutorRun =
+    typeof value["lastExecutorRun"] === "string" ? value["lastExecutorRun"] : undefined;
+
+  const legacyLastRun = typeof value["lastRun"] === "string" ? value["lastRun"] : undefined;
+  if (legacyLastRun !== undefined && lastSourceScanByProvider["claude"] === undefined) {
+    lastSourceScanByProvider["claude"] = legacyLastRun;
+  }
+
+  const legacyProcessed = value["processedSessions"];
+  if (isRecord(legacyProcessed) && processedSessionsByProvider["claude"] === undefined) {
+    const entries = Object.entries(legacyProcessed).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    );
+    processedSessionsByProvider["claude"] = Object.fromEntries(entries);
+  }
+
+  return {
+    lastSourceScanByProvider,
+    lastExecutorRun,
+    processedSessionsByProvider,
+  };
+};
+
+const normalizeJobState = (value: unknown): JobState => {
+  if (!isRecord(value)) return {};
+  return {
+    lastRun: typeof value["lastRun"] === "string" ? value["lastRun"] : undefined,
+  };
+};
+
+const normalizeDaemonState = (value: unknown): DaemonState => {
+  if (!isRecord(value)) return EMPTY_STATE;
+  return {
+    reflect: normalizeReflectState(value["reflect"]),
+    ruminate: normalizeJobState(value["ruminate"]),
+    meditate: normalizeJobState(value["meditate"]),
+  };
+};
+
+export const getProcessedSessions = (
+  state: DaemonState,
+  provider: AgentProviderId,
+): Record<string, string> => state.reflect?.processedSessionsByProvider?.[provider] ?? {};
 
 // --- State IO ---
 
@@ -42,10 +119,7 @@ export const readState = Effect.fn("readState")(function* (brainDir: string) {
   const filePath = path.join(brainDir, STATE_FILE);
 
   const exists = yield* fs.exists(filePath).pipe(Effect.catch(() => Effect.succeed(false)));
-
-  if (!exists) {
-    return { reflect: {}, ruminate: {}, meditate: {} } satisfies DaemonState;
-  }
+  if (!exists) return EMPTY_STATE;
 
   const text = yield* fs.readFileString(filePath).pipe(
     Effect.mapError(
@@ -57,11 +131,10 @@ export const readState = Effect.fn("readState")(function* (brainDir: string) {
     ),
   );
 
-  return yield* decodeDaemonState(text).pipe(
-    Effect.catch(() =>
-      Effect.succeed({ reflect: {}, ruminate: {}, meditate: {} } satisfies DaemonState),
-    ),
-  );
+  return yield* Effect.try({
+    try: () => normalizeDaemonState(JSON.parse(text)),
+    catch: () => new BrainError({ message: "Cannot parse daemon state", code: "READ_FAILED" }),
+  }).pipe(Effect.catch(() => Effect.succeed(EMPTY_STATE)));
 });
 
 /** Atomic write of daemon state */
@@ -71,15 +144,7 @@ export const writeState = Effect.fn("writeState")(function* (brainDir: string, s
   const filePath = path.join(brainDir, STATE_FILE);
   const tmpPath = `${filePath}.tmp`;
 
-  const text = yield* encodeDaemonState(state).pipe(
-    Effect.mapError(
-      () =>
-        new BrainError({
-          message: "Cannot encode daemon state",
-          code: "WRITE_FAILED",
-        }),
-    ),
-  );
+  const text = JSON.stringify(normalizeDaemonState(state), null, 2);
 
   yield* fs.writeFileString(tmpPath, text + "\n").pipe(
     Effect.mapError(
@@ -114,7 +179,6 @@ export const acquireLock = Effect.fn("acquireLock")(function* (brainDir: string,
   const lock = lockPath(brainDir, job, path);
   const pid = `${process.pid}\n`;
 
-  // Attempt atomic create-or-fail via O_EXCL (wx flag)
   const created = yield* Effect.try({
     try: () => {
       writeFileSync(lock, pid, { flag: "wx" });
@@ -125,7 +189,6 @@ export const acquireLock = Effect.fn("acquireLock")(function* (brainDir: string,
 
   if (created) return;
 
-  // Lock file exists — check if holder is alive
   const content = yield* fs.readFileString(lock).pipe(Effect.catch(() => Effect.succeed("")));
   const holderPid = parseInt(content.trim(), 10);
 
@@ -136,7 +199,6 @@ export const acquireLock = Effect.fn("acquireLock")(function* (brainDir: string,
     });
   }
 
-  // Stale lock — remove and retry once
   yield* fs.remove(lock).pipe(Effect.catch(() => Effect.void));
 
   yield* Effect.try({
@@ -170,7 +232,6 @@ export const releaseLock = Effect.fn("releaseLock")(function* (brainDir: string,
 
 // --- Utilities ---
 
-/** Require HOME to be set, failing with a clear error if missing */
 export const requireHome = Effect.fn("requireHome")(function* () {
   const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
   if (home.length > 0) return home;
@@ -180,7 +241,6 @@ export const requireHome = Effect.fn("requireHome")(function* () {
   });
 });
 
-/** Guard that fails on non-macOS platforms (launchd is macOS-only) */
 export const requireDarwin = Effect.fn("requireDarwin")(function* () {
   if (process.platform === "darwin") return;
   return yield* new BrainError({
@@ -189,14 +249,8 @@ export const requireDarwin = Effect.fn("requireDarwin")(function* () {
   });
 });
 
-/** Check if a file's mtime indicates it's settled (no writes for 30+ min) */
 export const isSettled = (mtime: Date): boolean => Date.now() - mtime.getTime() > SETTLE_MS;
 
-/**
- * macOS TCC-protected directories — `fs.exists()` on these triggers
- * permission popups (Photos, Network, etc). We skip probing any path
- * that resolves to one of these.
- */
 const TCC_DIRS = new Set([
   "Desktop",
   "Documents",
@@ -216,35 +270,19 @@ const isTccProtected = (candidate: string): boolean => {
   return TCC_DIRS.has(topDir);
 };
 
-/**
- * Derive a project name from a Claude projects dir name.
- * Claude uses dashified absolute paths: `-Users-cvr-Developer-personal-brain`
- *
- * The encoding is lossy — dashes serve as both path separators and literal hyphens.
- * We reverse the dashification by trying candidate paths (replacing `-` with `/`)
- * from right to left, checking which exists on disk. The basename of the first
- * match is the project name. Falls back to the last dash-delimited segment.
- *
- * Skips probing macOS TCC-protected directories (Downloads, Photos, etc.)
- * to avoid permission popups when run as a daemon.
- */
 export const deriveProjectName = Effect.fn("deriveProjectName")(function* (dirName: string) {
   if (dirName.length <= 1) return dirName;
 
   const fs = yield* FileSystem;
   const p = yield* Path;
 
-  // Decode: `--` = `/.` (dot-prefixed dirs), then `-` = `/`
   const decoded = dirName.replaceAll("--", "/.").replaceAll("-", "/");
 
-  // Check if the fully-decoded path exists — if so, just use basename
   if (!isTccProtected(decoded)) {
     const fullExists = yield* fs.exists(decoded).pipe(Effect.catch(() => Effect.succeed(false)));
     if (fullExists) return p.basename(decoded);
   }
 
-  // Walk dashes right-to-left, trying each split as path separator
-  // This finds the longest suffix that's a real directory name
   const dashes: number[] = [];
   for (let i = dirName.length - 1; i >= 0; i--) {
     if (dirName[i] === "-") dashes.push(i);
@@ -255,22 +293,23 @@ export const deriveProjectName = Effect.fn("deriveProjectName")(function* (dirNa
     const candidate = prefix.replaceAll("--", "/.").replaceAll("-", "/");
     if (isTccProtected(candidate)) continue;
     const exists = yield* fs.exists(candidate).pipe(Effect.catch(() => Effect.succeed(false)));
-    if (exists) {
-      // Everything after this dash is the project name
-      return dirName.slice(idx + 1);
-    }
+    if (exists) return dirName.slice(idx + 1);
   }
 
-  // Fallback: last dash-delimited segment
-  const parts = dirName.split("-").filter((s) => s.length > 0);
-  return parts[parts.length - 1] ?? dirName;
+  const home = process.env["HOME"] ?? "";
+  const homeDash = home.replaceAll("/.", "--").replaceAll("/", "-");
+  if (homeDash.length > 0 && dirName.startsWith(`${homeDash}-`)) {
+    return dirName.slice(homeDash.length + 1);
+  }
+
+  return dirName.split("-").at(-1) ?? dirName;
 });
 
-function isProcessAlive(pid: number): boolean {
+const isProcessAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
     return true;
   } catch {
     return false;
   }
-}
+};

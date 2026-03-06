@@ -1,12 +1,18 @@
 import { Command, Flag } from "effect/unstable/cli";
-import { Console, Effect } from "effect";
+import { Console, Effect, Option } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { PlatformError } from "effect/PlatformError";
 import { ConfigService } from "../services/Config.js";
 import { VaultService } from "../services/Vault.js";
 import { BuildInfo } from "../services/BuildInfo.js";
-import { ConfigError } from "../errors/index.js";
+import {
+  AgentPlatformService,
+  allAgentProviderIds,
+  isAgentProviderId,
+  type AgentProviderId,
+} from "../services/AgentPlatform.js";
+import { BrainError, ConfigError } from "../errors/index.js";
 
 const projectFlag = Flag.boolean("project").pipe(
   Flag.withAlias("p"),
@@ -23,6 +29,13 @@ const noSkillsFlag = Flag.boolean("no-skills").pipe(
 const forceSkillsFlag = Flag.boolean("force-skills").pipe(
   Flag.withDescription("Overwrite existing skills"),
 );
+const providerFlag = Flag.string("provider").pipe(
+  Flag.optional,
+  Flag.withDescription("Provider to configure (claude or codex)"),
+);
+const allProvidersFlag = Flag.boolean("all-providers").pipe(
+  Flag.withDescription("Configure all supported providers"),
+);
 const verboseFlag = Flag.boolean("verbose").pipe(
   Flag.withAlias("v"),
   Flag.withDescription("Print each file created, hook wired, skill installed to stderr"),
@@ -34,118 +47,190 @@ export const init = Command.make("init", {
   json: jsonFlag,
   noSkills: noSkillsFlag,
   forceSkills: forceSkillsFlag,
+  provider: providerFlag,
+  allProviders: allProvidersFlag,
   verbose: verboseFlag,
 }).pipe(
   Command.withDescription("Initialize a brain vault"),
-  Command.withHandler(({ project, global, json, noSkills, forceSkills, verbose }) =>
-    Effect.gen(function* () {
-      const config = yield* ConfigService;
-      const vault = yield* VaultService;
-      const fs = yield* FileSystem;
-      const path = yield* Path;
+  Command.withHandler(
+    ({ project, global, json, noSkills, forceSkills, provider, allProviders, verbose }) =>
+      Effect.gen(function* () {
+        const config = yield* ConfigService;
+        const platform = yield* AgentPlatformService;
+        const vault = yield* VaultService;
+        const fs = yield* FileSystem;
+        const path = yield* Path;
 
-      let vaultPath: string;
+        if (Option.isSome(provider) && !isAgentProviderId(provider.value)) {
+          return yield* new BrainError({
+            message: `Unknown provider "${provider.value}". Valid: ${allAgentProviderIds.join(", ")}`,
+            code: "UNSUPPORTED_PROVIDER",
+          });
+        }
+        const requestedProvider = Option.map(provider, (value) => value as AgentProviderId);
 
-      if (project) {
-        if (global) {
-          const globalPath = yield* config.globalVaultPath();
-          const cwd = process.cwd();
-          const projectName = path.basename(cwd);
-          vaultPath = path.join(globalPath, "projects", projectName);
-          const targetExists = yield* fs.exists(vaultPath).pipe(
-            Effect.mapError(
-              (e: PlatformError) =>
-                new ConfigError({
-                  message: `Cannot check project vault: ${e.message}`,
-                  code: "READ_FAILED",
-                }),
-            ),
-          );
-          if (targetExists) {
-            yield* Console.error(`Warning: project vault already exists at ${vaultPath}`);
+        let vaultPath: string;
+
+        if (project) {
+          if (global) {
+            const globalPath = yield* config.globalVaultPath();
+            const cwd = process.cwd();
+            const projectName = path.basename(cwd);
+            vaultPath = path.join(globalPath, "projects", projectName);
+            const targetExists = yield* fs.exists(vaultPath).pipe(
+              Effect.mapError(
+                (e: PlatformError) =>
+                  new ConfigError({
+                    message: `Cannot check project vault: ${e.message}`,
+                    code: "READ_FAILED",
+                  }),
+              ),
+            );
+            if (targetExists) {
+              yield* Console.error(`Warning: project vault already exists at ${vaultPath}`);
+            }
+          } else {
+            const cwd = process.cwd();
+            vaultPath = path.join(cwd, "brain");
           }
         } else {
-          const cwd = process.cwd();
-          vaultPath = path.join(cwd, "brain");
+          vaultPath = yield* config.globalVaultPath();
         }
-      } else {
-        vaultPath = yield* config.globalVaultPath();
-      }
 
-      const isProjectSubVault = project && global;
-      const created = yield* vault.init(vaultPath, { minimal: isProjectSubVault });
+        const isProjectSubVault = project && global;
+        const created = yield* vault.init(vaultPath, { minimal: isProjectSubVault });
 
-      // Copy starter principles if principles/ is empty (skip for project sub-vaults)
-      if (!isProjectSubVault) {
-        yield* copyStarterPrinciples(fs, path, vaultPath);
-      }
+        // Copy starter principles if principles/ is empty (skip for project sub-vaults)
+        if (!isProjectSubVault) {
+          yield* copyStarterPrinciples(fs, path, vaultPath);
+        }
 
-      const cfgPath = yield* config.configFilePath();
-      const cfgExists = yield* fs.exists(cfgPath).pipe(
-        Effect.mapError(
-          (e: PlatformError) =>
-            new ConfigError({
-              message: `Cannot check config: ${e.message}`,
-              code: "READ_FAILED",
-            }),
-        ),
-      );
-      if (!cfgExists) {
-        yield* config.saveConfigFile({});
-      }
-
-      const settingsPath = yield* config.claudeSettingsPath();
-      const hooksChanged = yield* wireHooks(fs, path, settingsPath);
-
-      const skillResult = noSkills
-        ? { installed: [] as string[], conflicts: [] as string[], target: "" }
-        : yield* installSkills(fs, path, forceSkills, settingsPath);
-
-      if (json) {
-        // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
-        yield* Console.log(
-          JSON.stringify({
-            vault: vaultPath,
-            config: cfgPath,
-            hooks: settingsPath,
-            files: created,
-            skills: skillResult,
-          }),
+        const cfgPath = yield* config.configFilePath();
+        const cfgExists = yield* fs.exists(cfgPath).pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new ConfigError({
+                message: `Cannot check config: ${e.message}`,
+                code: "READ_FAILED",
+              }),
+          ),
         );
-      } else {
-        if (created.length > 0) {
-          yield* Console.error(`Created vault at ${vaultPath}`);
-          for (const f of created) {
-            yield* Console.error(`  ${f}`);
-          }
+        const existingConfig: {
+          globalVault?: string;
+          defaultProvider?: AgentProviderId;
+          daemon?: { provider?: AgentProviderId };
+        } = yield* config.loadConfigFile().pipe(Effect.catch(() => Effect.succeed({})));
+
+        const providerIds: Array<AgentProviderId> = Option.isSome(requestedProvider)
+          ? [requestedProvider.value]
+          : allProviders
+            ? (["claude", "codex"] as Array<AgentProviderId>)
+            : [yield* platform.resolveInteractiveProvider(Option.none())];
+
+        const nextDefaultProvider = Option.getOrElse(
+          requestedProvider,
+          () => existingConfig.defaultProvider ?? providerIds[0] ?? "claude",
+        );
+
+        if (!cfgExists || existingConfig.defaultProvider !== nextDefaultProvider) {
+          yield* config.saveConfigFile({
+            ...existingConfig,
+            defaultProvider: nextDefaultProvider,
+          });
         }
-        if (!cfgExists) {
-          yield* Console.error(`Wrote config to ${cfgPath}`);
+
+        const integrations: Array<{
+          provider: string;
+          hooks: Option.Option<string>;
+          hooksChanged: boolean;
+          hooksSkipped: boolean;
+          skills: { installed: string[]; conflicts: string[]; target: string };
+        }> = [];
+
+        for (const providerId of providerIds) {
+          const agent = yield* platform.getProvider(providerId);
+          const hooksChanged = agent.integration.supportsHooks
+            ? yield* wireHooks(fs, path, agent.integration.settingsPath)
+            : false;
+          const hooksSkipped = !agent.integration.supportsHooks;
+          const skillResult = noSkills
+            ? {
+                installed: [] as string[],
+                conflicts: [] as string[],
+                target: agent.integration.skillsDir,
+              }
+            : yield* installSkills(fs, path, forceSkills, agent.integration.settingsPath);
+
+          integrations.push({
+            provider: providerId,
+            hooks: agent.integration.supportsHooks
+              ? Option.some(agent.integration.settingsPath)
+              : Option.none(),
+            hooksChanged,
+            hooksSkipped,
+            skills: skillResult,
+          });
         }
-        if (hooksChanged) {
-          yield* Console.error(`Wired hooks into ${settingsPath}`);
-        }
-        if (skillResult.installed.length > 0) {
-          yield* Console.error(`Installed skills to ${skillResult.target}`);
-          for (const s of skillResult.installed) {
-            yield* Console.error(`  ${s}`);
-          }
-        }
-        const somethingChanged =
-          created.length > 0 || !cfgExists || hooksChanged || skillResult.installed.length > 0;
-        if (skillResult.conflicts.length > 0 && (somethingChanged || verbose)) {
-          yield* Console.error(`Skipped (already exist):`);
-          for (const s of skillResult.conflicts) {
-            yield* Console.error(`  ${s} — use brain init --force-skills to override`);
-          }
-        }
-        if (somethingChanged) {
-          yield* Console.error(`\nDone — vault ready at ${vaultPath}`);
+
+        if (json) {
+          // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
+          yield* Console.log(
+            JSON.stringify({
+              vault: vaultPath,
+              config: cfgPath,
+              files: created,
+              providers: integrations,
+            }),
+          );
         } else {
-          yield* Console.error(`Already initialized — vault at ${vaultPath}`);
+          if (created.length > 0) {
+            yield* Console.error(`Created vault at ${vaultPath}`);
+            for (const f of created) {
+              yield* Console.error(`  ${f}`);
+            }
+          }
+          if (!cfgExists) {
+            yield* Console.error(`Wrote config to ${cfgPath}`);
+          }
+          for (const integration of integrations) {
+            if (integration.hooksChanged && Option.isSome(integration.hooks)) {
+              yield* Console.error(
+                `Wired ${integration.provider} hooks into ${integration.hooks.value}`,
+              );
+            }
+            if (integration.hooksSkipped) {
+              yield* Console.error(`Skipped ${integration.provider} hooks — unsupported`);
+            }
+            if (integration.skills.installed.length > 0) {
+              yield* Console.error(
+                `Installed ${integration.provider} skills to ${integration.skills.target}`,
+              );
+              for (const s of integration.skills.installed) {
+                yield* Console.error(`  ${s}`);
+              }
+            }
+          }
+          const somethingChanged =
+            created.length > 0 ||
+            !cfgExists ||
+            integrations.some((integration) => integration.hooksChanged) ||
+            integrations.some((integration) => integration.skills.installed.length > 0);
+          const conflicts = integrations.flatMap((integration) =>
+            integration.skills.conflicts.map((skill) => `${integration.provider}:${skill}`),
+          );
+          if (conflicts.length > 0 && (somethingChanged || verbose)) {
+            yield* Console.error(`Skipped (already exist):`);
+            for (const s of conflicts) {
+              yield* Console.error(`  ${s} — use brain init --force-skills to override`);
+            }
+          }
+          if (somethingChanged) {
+            yield* Console.error(`\nDone — vault ready at ${vaultPath}`);
+          } else {
+            yield* Console.error(`Already initialized — vault at ${vaultPath}`);
+          }
         }
-      }
-    }),
+      }),
   ),
 );
 

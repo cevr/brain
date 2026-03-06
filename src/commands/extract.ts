@@ -4,6 +4,7 @@ import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import { BrainError } from "../errors/index.js";
+import { isAgentProviderId, type AgentProviderId } from "../services/AgentPlatform.js";
 
 const dirArg = Argument.string("dir").pipe(
   Argument.withDescription("Path to JSONL conversation directory"),
@@ -46,6 +47,92 @@ interface Conversation {
   readonly modifiedAt: Date;
 }
 
+const providerFlag = Flag.string("provider").pipe(
+  Flag.optional,
+  Flag.withDescription("Conversation provider (claude or codex)"),
+);
+
+const detectProviderFromPath = (inputDir: string): AgentProviderId =>
+  inputDir.includes("/.codex/") ? "codex" : "claude";
+
+const parseClaudeMessage = (parsed: Record<string, unknown>): Message[] => {
+  const msgType = parsed["type"];
+  if (msgType !== "user" && msgType !== "assistant") return [];
+  if (parsed["isMeta"] === true) return [];
+  const subType = parsed["subType"];
+  if (
+    subType === "tool_use" ||
+    subType === "tool_result" ||
+    subType === "mcp_tool_use" ||
+    subType === "mcp_tool_result"
+  ) {
+    return [];
+  }
+
+  const msg = parsed["message"];
+  if (typeof msg !== "object" || msg === null) return [];
+  const rawContent = (msg as Record<string, unknown>)["content"];
+  const texts: string[] = [];
+
+  if (typeof rawContent === "string") {
+    texts.push(rawContent);
+  } else if (Array.isArray(rawContent)) {
+    for (const part of rawContent) {
+      if (
+        typeof part === "object" &&
+        part !== null &&
+        (part as Record<string, unknown>)["type"] === "text" &&
+        typeof (part as Record<string, unknown>)["text"] === "string"
+      ) {
+        texts.push((part as { text: string }).text);
+      }
+    }
+  }
+
+  return texts
+    .map((text) => text.trim())
+    .filter((text) => text.length > 10)
+    .filter(
+      (text) => !(text.startsWith("<system-reminder>") && text.endsWith("</system-reminder>")),
+    )
+    .map((text) => ({
+      role: msgType,
+      content: text.slice(0, msgType === "user" ? 3000 : 800),
+    }));
+};
+
+const parseCodexMessage = (parsed: Record<string, unknown>): Message[] => {
+  if (parsed["type"] !== "response_item") return [];
+  const payload = parsed["payload"];
+  if (typeof payload !== "object" || payload === null) return [];
+  const payloadRecord = payload as Record<string, unknown>;
+  if (payloadRecord["type"] !== "message") return [];
+
+  const role = payloadRecord["role"];
+  if (role !== "user" && role !== "assistant") return [];
+
+  const content = payloadRecord["content"];
+  if (!Array.isArray(content)) return [];
+
+  const texts = content
+    .flatMap((item) => {
+      if (typeof item !== "object" || item === null) return [];
+      const record = item as Record<string, unknown>;
+      const text = record["text"];
+      return typeof text === "string" ? [text] : [];
+    })
+    .map((text) => text.trim())
+    .filter((text) => text.length > 10);
+
+  return texts.map((text) => ({
+    role,
+    content: text.slice(0, role === "user" ? 3000 : 800),
+  }));
+};
+
+const parseLine = (line: string): Option.Option<Record<string, unknown>> =>
+  Option.liftThrowable(() => JSON.parse(line) as Record<string, unknown>)();
+
 /** @internal */
 export const extractConversations = Effect.fn("extractConversations")(function* (
   inputDir: string,
@@ -55,10 +142,12 @@ export const extractConversations = Effect.fn("extractConversations")(function* 
     from?: Option.Option<string>;
     to?: Option.Option<string>;
     minSize?: number;
+    provider?: AgentProviderId;
   } = {},
 ) {
   const fs = yield* FileSystem;
   const path = yield* Path;
+  const provider = opts.provider ?? detectProviderFromPath(inputDir);
 
   const fromMs = Option.map(opts.from ?? Option.none(), (d) => new Date(d).getTime());
   const toMs = Option.map(opts.to ?? Option.none(), (d) => new Date(d).getTime() + 86400000 - 1);
@@ -129,58 +218,13 @@ export const extractConversations = Effect.fn("extractConversations")(function* 
     for (const line of lines) {
       if (line.trim().length === 0) continue;
       const parsed = parseLine(line);
-      if (parsed === null) continue;
+      if (Option.isNone(parsed)) continue;
 
-      // Top-level type determines role (not message.role)
-      const msgType = parsed["type"] as string | undefined;
-      if (msgType !== "user" && msgType !== "assistant") continue;
-
-      // Skip meta messages and tool-related subTypes (preserve thinking, etc.)
-      if (parsed["isMeta"] === true) continue;
-      const subType = parsed["subType"] as string | undefined;
-      if (
-        subType === "tool_use" ||
-        subType === "tool_result" ||
-        subType === "mcp_tool_use" ||
-        subType === "mcp_tool_result"
-      )
-        continue;
-
-      // Content is nested under message
-      const msg = parsed["message"];
-      if (typeof msg !== "object" || msg === null) continue;
-      const msgObj = msg as Record<string, unknown>;
-      const rawContent = msgObj["content"];
-
-      const texts: string[] = [];
-      if (typeof rawContent === "string") {
-        texts.push(rawContent);
-      } else if (Array.isArray(rawContent)) {
-        for (const c of rawContent as Array<Record<string, unknown>>) {
-          if (
-            typeof c === "object" &&
-            c !== null &&
-            c["type"] === "text" &&
-            typeof c["text"] === "string"
-          ) {
-            texts.push(c["text"] as string);
-          }
-        }
-      }
-
-      for (const t of texts) {
-        const clean = t.trim();
-        if (clean.length <= 10) continue;
-
-        // Skip system-reminder-only messages
-        if (clean.startsWith("<system-reminder>") && clean.endsWith("</system-reminder>")) continue;
-
-        const maxLen = msgType === "user" ? 3000 : 800;
-        messages.push({
-          role: msgType,
-          content: clean.slice(0, maxLen),
-        });
-      }
+      messages.push(
+        ...(provider === "claude"
+          ? parseClaudeMessage(parsed.value)
+          : parseCodexMessage(parsed.value)),
+      );
     }
 
     if (messages.length < 2) continue;
@@ -266,17 +310,27 @@ export const extract = Command.make("extract", {
   to: toFlag,
   json: jsonFlag,
   minSize: minSizeFlag,
+  provider: providerFlag,
   verbose: verboseFlag,
 }).pipe(
   Command.withDescription("Extract conversations for ruminate"),
   Command.withHandler(
-    ({ dir, output, batches, from: fromDate, to: toDate, json, minSize, verbose }) =>
+    ({ dir, output, batches, from: fromDate, to: toDate, json, minSize, provider, verbose }) =>
       Effect.gen(function* () {
+        if (Option.isSome(provider) && !isAgentProviderId(provider.value)) {
+          return yield* new BrainError({
+            message: `Unknown provider "${provider.value}". Valid: claude, codex`,
+            code: "UNSUPPORTED_PROVIDER",
+          });
+        }
+        const selectedProvider = Option.map(provider, (value) => value as AgentProviderId);
+
         const result = yield* extractConversations(dir, output, {
           batches,
           from: fromDate,
           to: toDate,
           minSize,
+          provider: Option.getOrUndefined(selectedProvider),
         });
 
         if (verbose) {
@@ -305,11 +359,3 @@ export const extract = Command.make("extract", {
       }),
   ),
 );
-
-function parseLine(line: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(line) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}

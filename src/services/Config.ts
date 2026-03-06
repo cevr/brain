@@ -3,9 +3,18 @@ import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import { ConfigError } from "../errors/index.js";
+import type { AgentProviderId } from "./AgentPlatform.js";
+
+const ProviderSchema = Schema.Union([Schema.Literal("claude"), Schema.Literal("codex")]);
 
 const ConfigFileSchema = Schema.Struct({
   globalVault: Schema.optional(Schema.String),
+  defaultProvider: Schema.optional(ProviderSchema),
+  daemon: Schema.optional(
+    Schema.Struct({
+      provider: Schema.optional(ProviderSchema),
+    }),
+  ),
 });
 
 type ConfigFile = typeof ConfigFileSchema.Type;
@@ -22,7 +31,7 @@ export class ConfigService extends ServiceMap.Service<
     readonly activeVaultPath: () => Effect.Effect<string, ConfigError>;
     readonly currentProjectName: () => Effect.Effect<Option.Option<string>, ConfigError>;
     readonly configFilePath: () => Effect.Effect<string, ConfigError>;
-    readonly claudeSettingsPath: () => Effect.Effect<string, ConfigError>;
+    readonly defaultProvider: () => Effect.Effect<Option.Option<AgentProviderId>, ConfigError>;
     readonly loadConfigFile: () => Effect.Effect<ConfigFile, ConfigError>;
     readonly saveConfigFile: (config: ConfigFile) => Effect.Effect<void, ConfigError>;
   }
@@ -119,7 +128,12 @@ export class ConfigService extends ServiceMap.Service<
         return yield* globalVaultPath();
       });
 
-      const claudeSettingsPath = () => Effect.succeed(path.join(home, ".claude", "settings.json"));
+      const defaultProvider = Effect.fn("ConfigService.defaultProvider")(function* () {
+        const cfg = yield* loadConfigFile();
+        return cfg.defaultProvider !== undefined
+          ? Option.some(cfg.defaultProvider)
+          : Option.none<AgentProviderId>();
+      });
 
       const saveConfigFile = Effect.fn("ConfigService.saveConfigFile")(function* (
         config: ConfigFile,
@@ -201,7 +215,7 @@ export class ConfigService extends ServiceMap.Service<
         activeVaultPath,
         currentProjectName,
         configFilePath: resolveConfigFilePath,
-        claudeSettingsPath,
+        defaultProvider,
         loadConfigFile,
         saveConfigFile,
       };

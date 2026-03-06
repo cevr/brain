@@ -9,7 +9,7 @@ import { withTempDir } from "../../helpers/index.js";
 import { scanSessions, runReflect } from "../../../src/commands/daemon/reflect.js";
 import { readState, type DaemonState } from "../../../src/commands/daemon/state.js";
 import { BrainError } from "../../../src/errors/index.js";
-import { ClaudeService, type ClaudeInvocation } from "../../../src/services/Claude.js";
+import { AgentPlatformService } from "../../../src/services/AgentPlatform.js";
 import { ConfigService } from "../../../src/services/Config.js";
 import { VaultService } from "../../../src/services/Vault.js";
 
@@ -56,6 +56,7 @@ const setupProjectSessions = Effect.fn("setupProjectSessions")(function* (
 });
 
 const oldDate = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago — settled
+const staleDate = new Date(Date.now() - 25 * 60 * 60 * 1000); // 25 hours ago — too old
 const recentDate = new Date(Date.now() - 5 * 60 * 1000); // 5 min ago — not settled
 
 const bigMessages = [
@@ -71,20 +72,55 @@ const makeConfigLayer = (dir: string, brainDir: string) =>
     activeVaultPath: () => Effect.succeed(brainDir),
     currentProjectName: () => Effect.succeed(Option.none()),
     configFilePath: () => Effect.succeed(`${dir}/config.json`),
-    claudeSettingsPath: () => Effect.succeed(`${dir}/settings.json`),
+    defaultProvider: () => Effect.succeed(Option.some("claude")),
     loadConfigFile: () => Effect.succeed({}),
     saveConfigFile: () => Effect.void,
+  });
+
+interface AgentInvocation {
+  readonly prompt: string;
+  readonly profile: string;
+  readonly cwd: string | undefined;
+}
+
+const makePlatformLayer = (
+  invocations: Ref.Ref<Array<AgentInvocation>>,
+  invokeImpl?: (prompt: string, profile: string, cwd?: string) => Effect.Effect<void, BrainError>,
+) =>
+  Layer.succeed(AgentPlatformService, {
+    getProvider: () =>
+      Effect.succeed({
+        id: "claude" as const,
+        integration: {
+          homeDir: "/tmp/.claude",
+          settingsPath: "/tmp/.claude/settings.json",
+          skillsDir: "/tmp/.claude/skills",
+          supportsHooks: true,
+        },
+        reflectRoot: "/tmp/.claude/projects",
+        extractRoot: "/tmp/.claude/projects",
+        detectSource: () => Effect.succeed(true),
+        isExecutable: () => Effect.succeed(true),
+        invoke:
+          invokeImpl ??
+          ((prompt, profile, cwd) =>
+            Ref.update(invocations, (arr) => [...arr, { prompt, profile, cwd }])),
+      }),
+    listDetectedSourceProviders: () => Effect.succeed(["claude", "codex"] as const),
+    listExecutableProviders: () => Effect.succeed(["claude"] as const),
+    resolveInteractiveProvider: () => Effect.succeed("claude" as const),
+    resolveDaemonExecutor: () => Effect.succeed("claude" as const),
   });
 
 const makeTestLayers = (
   dir: string,
   brainDir: string,
-  invocations: Ref.Ref<Array<ClaudeInvocation>>,
+  invocations: Ref.Ref<Array<AgentInvocation>>,
 ) =>
   Layer.mergeAll(
     makeConfigLayer(dir, brainDir),
     VaultService.layer,
-    ClaudeService.layerTest(invocations),
+    makePlatformLayer(invocations),
   ).pipe(Layer.provideMerge(BunServices.layer));
 
 describe("daemon reflect", () => {
@@ -139,6 +175,31 @@ describe("daemon reflect", () => {
       ).pipe(Effect.provide(TestLayer)),
     );
 
+    it.live("skips sessions older than 24 hours", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const origHome = process.env["HOME"];
+          try {
+            process.env["HOME"] = dir;
+            const dn = fakeDirName(dir, "project-old");
+
+            yield* setupProjectSessions(dir, dn, [
+              { name: "stale.jsonl", mtime: staleDate, messages: bigMessages },
+              { name: "fresh.jsonl", mtime: oldDate, messages: bigMessages },
+            ]);
+
+            const groups = yield* scanSessions({ reflect: {}, ruminate: {}, meditate: {} });
+
+            expect(groups).toHaveLength(1);
+            expect(groups[0]?.sessions).toHaveLength(1);
+            expect(groups[0]?.sessions[0]?.name).toBe("fresh.jsonl");
+          } finally {
+            process.env["HOME"] = origHome;
+          }
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
     it.live("skips already-processed sessions with same mtime", () =>
       withTempDir((dir) =>
         Effect.gen(function* () {
@@ -153,8 +214,10 @@ describe("daemon reflect", () => {
 
             const state: DaemonState = {
               reflect: {
-                processedSessions: {
-                  [`${dn}/done.jsonl`]: oldDate.toISOString(),
+                processedSessionsByProvider: {
+                  claude: {
+                    [`${dn}/done.jsonl`]: oldDate.toISOString(),
+                  },
                 },
               },
               ruminate: {},
@@ -184,8 +247,10 @@ describe("daemon reflect", () => {
 
             const state: DaemonState = {
               reflect: {
-                processedSessions: {
-                  [`${dn}/changed.jsonl`]: "2024-01-01T00:00:00.000Z",
+                processedSessionsByProvider: {
+                  claude: {
+                    [`${dn}/changed.jsonl`]: "2024-01-01T00:00:00.000Z",
+                  },
                 },
               },
               ruminate: {},
@@ -263,21 +328,22 @@ describe("daemon reflect", () => {
               { name: "conv.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 
-            const invocations = yield* Ref.make<Array<ClaudeInvocation>>([]);
+            const invocations = yield* Ref.make<Array<AgentInvocation>>([]);
             const layers = makeTestLayers(dir, brainDir, invocations);
 
             yield* runReflect().pipe(Effect.provide(layers));
 
             const calls = yield* Ref.get(invocations);
             expect(calls.length).toBeGreaterThanOrEqual(1);
-            expect(calls[0]?.model).toBe("sonnet");
-            expect(calls[0]?.prompt).toContain("/reflect");
+            expect(calls[0]?.profile).toBe("standard");
             expect(calls[0]?.prompt).toContain(".jsonl");
-            expect(calls[0]?.prompt).toContain("Session files for project");
+            expect(calls[0]?.prompt).toContain("Read these recent settled session files");
 
             const state = yield* readState(brainDir).pipe(Effect.provide(layers));
-            expect(state.reflect?.lastRun).toBeDefined();
-            expect(state.reflect?.processedSessions?.[`${dn}/conv.jsonl`]).toBeDefined();
+            expect(state.reflect?.lastExecutorRun).toBeDefined();
+            expect(
+              state.reflect?.processedSessionsByProvider?.claude?.[`${dn}/conv.jsonl`],
+            ).toBeDefined();
           } finally {
             process.env["HOME"] = origHome;
           }
@@ -301,7 +367,7 @@ describe("daemon reflect", () => {
               { name: "conv.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 
-            const invocations = yield* Ref.make<Array<ClaudeInvocation>>([]);
+            const invocations = yield* Ref.make<Array<AgentInvocation>>([]);
             const layers = makeTestLayers(dir, brainDir, invocations);
 
             // First run
@@ -339,16 +405,14 @@ describe("daemon reflect", () => {
               { name: "conv.jsonl", mtime: oldDate, messages: bigMessages },
             ]);
 
-            // Claude layer that always fails
-            const failingClaude = Layer.succeed(ClaudeService, {
-              invoke: () =>
-                Effect.fail(new BrainError({ message: "Claude crashed", code: "SPAWN_FAILED" })),
-            });
+            const invocations = yield* Ref.make<Array<AgentInvocation>>([]);
 
             const layers = Layer.mergeAll(
               makeConfigLayer(dir, brainDir),
               VaultService.layer,
-              failingClaude,
+              makePlatformLayer(invocations, () =>
+                Effect.fail(new BrainError({ message: "Executor crashed", code: "SPAWN_FAILED" })),
+              ),
             ).pipe(Layer.provideMerge(BunServices.layer));
 
             // Should not throw — error is caught per-group
@@ -388,9 +452,12 @@ describe("daemon reflect", () => {
             ]);
 
             let callCount = 0;
-            // Claude that fails on first invocation, succeeds on second
-            const flakyClaudeLayer = Layer.succeed(ClaudeService, {
-              invoke: () =>
+            const invocations = yield* Ref.make<Array<AgentInvocation>>([]);
+
+            const layers = Layer.mergeAll(
+              makeConfigLayer(dir, brainDir),
+              VaultService.layer,
+              makePlatformLayer(invocations, () =>
                 Effect.suspend(() => {
                   callCount++;
                   if (callCount === 1) {
@@ -400,12 +467,7 @@ describe("daemon reflect", () => {
                   }
                   return Effect.void;
                 }),
-            });
-
-            const layers = Layer.mergeAll(
-              makeConfigLayer(dir, brainDir),
-              VaultService.layer,
-              flakyClaudeLayer,
+              ),
             ).pipe(Layer.provideMerge(BunServices.layer));
 
             yield* runReflect().pipe(Effect.provide(layers));
@@ -415,7 +477,7 @@ describe("daemon reflect", () => {
 
             // The succeeding group's sessions should be checkpointed
             const state = yield* readState(brainDir).pipe(Effect.provide(layers));
-            const processed = state.reflect?.processedSessions ?? {};
+            const processed = state.reflect?.processedSessionsByProvider?.claude ?? {};
             // One group succeeded, one failed — at least one session should be checkpointed
             const processedKeys = Object.keys(processed);
             expect(processedKeys.length).toBeGreaterThanOrEqual(1);

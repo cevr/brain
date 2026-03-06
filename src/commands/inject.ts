@@ -44,7 +44,7 @@ export const inject = Command.make("inject", { json: jsonFlag }).pipe(
       // Detect project-specific notes in global vault's projects/<name>/
       const projectName = yield* config.currentProjectName();
       let projectNotes = "";
-      let detectedProject: string | null = null;
+      let detectedProject = Option.none<string>();
       if (Option.isSome(projectName)) {
         const projectDir = path.join(globalPath, "projects", projectName.value);
         const dirExists = yield* fs
@@ -55,7 +55,7 @@ export const inject = Command.make("inject", { json: jsonFlag }).pipe(
             .listFiles(projectDir)
             .pipe(Effect.catch(() => Effect.succeed([] as string[])));
           if (files.length > 0) {
-            detectedProject = projectName.value;
+            detectedProject = Option.some(projectName.value);
             projectNotes = files.map((f) => `- [[projects/${projectName.value}/${f}]]`).join("\n");
           }
         }
@@ -67,7 +67,7 @@ export const inject = Command.make("inject", { json: jsonFlag }).pipe(
           JSON.stringify({
             global: globalIndex,
             project: Option.isSome(projectPath) && projectIndex.length > 0 ? projectIndex : null,
-            projectName: detectedProject,
+            projectName: Option.getOrNull(detectedProject),
             projectNotes: projectNotes.length > 0 ? projectNotes : null,
             index:
               globalIndex +
@@ -82,7 +82,7 @@ export const inject = Command.make("inject", { json: jsonFlag }).pipe(
       output += globalIndex;
 
       if (projectNotes.length > 0) {
-        output += `\n## Project: ${detectedProject}\n${projectNotes}\n`;
+        output += `\n## Project: ${Option.getOrThrow(detectedProject)}\n${projectNotes}\n`;
       }
 
       if (Option.isSome(projectPath) && projectIndex.length > 0) {

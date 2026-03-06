@@ -34,8 +34,11 @@ describe("daemon state", () => {
         Effect.gen(function* () {
           const original = {
             reflect: {
-              lastRun: "2024-06-01T00:00:00.000Z",
-              processedSessions: { "proj/session.jsonl": "2024-06-01T00:00:00.000Z" },
+              lastExecutorRun: "2024-06-01T00:00:00.000Z",
+              lastSourceScanByProvider: { claude: "2024-06-01T00:00:00.000Z" },
+              processedSessionsByProvider: {
+                claude: { "proj/session.jsonl": "2024-06-01T00:00:00.000Z" },
+              },
             },
             ruminate: { lastRun: "2024-05-01T00:00:00.000Z" },
             meditate: { lastRun: "2024-04-01T00:00:00.000Z" },
@@ -44,12 +47,35 @@ describe("daemon state", () => {
           yield* writeState(dir, original);
           const loaded = yield* readState(dir);
 
-          expect(loaded.reflect?.lastRun).toBe("2024-06-01T00:00:00.000Z");
-          expect(loaded.reflect?.processedSessions?.["proj/session.jsonl"]).toBe(
+          expect(loaded.reflect?.lastExecutorRun).toBe("2024-06-01T00:00:00.000Z");
+          expect(loaded.reflect?.processedSessionsByProvider?.claude?.["proj/session.jsonl"]).toBe(
             "2024-06-01T00:00:00.000Z",
           );
           expect(loaded.ruminate?.lastRun).toBe("2024-05-01T00:00:00.000Z");
           expect(loaded.meditate?.lastRun).toBe("2024-04-01T00:00:00.000Z");
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("migrates legacy reflect state into claude provider buckets", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem;
+          yield* fs.writeFileString(
+            `${dir}/.daemon.json`,
+            JSON.stringify({
+              reflect: {
+                lastRun: "2024-06-01T00:00:00.000Z",
+                processedSessions: { "proj/session.jsonl": "2024-06-01T00:00:00.000Z" },
+              },
+            }),
+          );
+
+          const loaded = yield* readState(dir);
+          expect(loaded.reflect?.lastSourceScanByProvider?.claude).toBe("2024-06-01T00:00:00.000Z");
+          expect(loaded.reflect?.processedSessionsByProvider?.claude?.["proj/session.jsonl"]).toBe(
+            "2024-06-01T00:00:00.000Z",
+          );
         }),
       ).pipe(Effect.provide(TestLayer)),
     );

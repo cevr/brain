@@ -1,9 +1,11 @@
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { Console, Effect } from "effect";
+import { Console, Effect, Option } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { ConfigService } from "../services/Config.js";
+import { isAgentProviderId, type AgentProviderId } from "../services/AgentPlatform.js";
 import { BrainError } from "../errors/index.js";
+import type { DaemonState } from "./daemon/state.js";
 import { lockExists, readState, requireHome } from "./daemon/state.js";
 import { runReflect } from "./daemon/reflect.js";
 import { runRuminate } from "./daemon/ruminate.js";
@@ -34,6 +36,47 @@ const tailFlag = Flag.boolean("tail").pipe(
   Flag.withAlias("f"),
   Flag.withDescription("Follow log output"),
 );
+
+const executorProviderFlag = Flag.string("executor-provider").pipe(
+  Flag.optional,
+  Flag.withDescription("Provider to execute daemon jobs with (claude or codex)"),
+);
+
+const sourceProviderFlag = Flag.string("source-provider").pipe(
+  Flag.optional,
+  Flag.withDescription("Restrict daemon source scanning to one provider (claude or codex)"),
+);
+
+const parseProviderOption = (
+  label: string,
+  value: Option.Option<string>,
+): Effect.Effect<Option.Option<AgentProviderId>, BrainError> => {
+  if (Option.isNone(value)) return Effect.succeed(Option.none());
+  if (!isAgentProviderId(value.value)) {
+    return Effect.fail(
+      new BrainError({
+        message: `Unknown ${label} "${value.value}". Valid: claude, codex`,
+        code: "UNSUPPORTED_PROVIDER",
+      }),
+    );
+  }
+  return Effect.succeed(Option.some(value.value));
+};
+
+const getProcessedCount = (state: DaemonState): number =>
+  Object.values(state.reflect?.processedSessionsByProvider ?? {}).reduce<number>(
+    (count, processed) => count + Object.keys(processed ?? {}).length,
+    0,
+  );
+
+const fromNullable = <A>(value: A | null | undefined): Option.Option<NonNullable<A>> =>
+  value === null || value === undefined ? Option.none() : Option.some(value as NonNullable<A>);
+
+interface JobStatus {
+  readonly name: string;
+  readonly lastRun: Option.Option<string>;
+  readonly locked: boolean;
+}
 
 // --- Helpers ---
 
@@ -98,12 +141,16 @@ const status = Command.make("status", { json: jsonFlag }).pipe(
       const brainDir = yield* config.globalVaultPath();
       const state = yield* readState(brainDir);
       const loaded = yield* isUnifiedLoaded();
-      const processedCount = Object.keys(state.reflect?.processedSessions ?? {}).length;
+      const processedCount = getProcessedCount(state);
 
-      const jobs: Array<{ name: string; lastRun: string | null; locked: boolean }> = [];
+      const jobs: Array<JobStatus> = [];
       for (const job of ALL_JOBS) {
         const locked = yield* lockExists(brainDir, job);
-        jobs.push({ name: job, lastRun: state[job]?.lastRun ?? null, locked });
+        const lastRun =
+          job === "reflect"
+            ? fromNullable(state.reflect?.lastExecutorRun)
+            : fromNullable(state[job]?.lastRun);
+        jobs.push({ name: job, lastRun, locked });
       }
 
       if (json) {
@@ -112,7 +159,11 @@ const status = Command.make("status", { json: jsonFlag }).pipe(
           JSON.stringify({
             loaded,
             schedule: UNIFIED_SCHEDULE,
-            jobs,
+            jobs: jobs.map((job) => ({
+              name: job.name,
+              lastRun: Option.getOrNull(job.lastRun),
+              locked: job.locked,
+            })),
             processedSessions: processedCount,
           }),
         );
@@ -120,7 +171,10 @@ const status = Command.make("status", { json: jsonFlag }).pipe(
         yield* Console.log(`Scheduler: ${loaded ? "loaded" : "not loaded"} (${UNIFIED_SCHEDULE})`);
         yield* Console.log("");
         for (const j of jobs) {
-          const lastRunStr = j.lastRun !== null ? relativeTime(j.lastRun) : "never";
+          const lastRunStr = Option.match(j.lastRun, {
+            onNone: () => "never",
+            onSome: relativeTime,
+          });
           const lockStr = j.locked ? " [LOCKED]" : "";
           yield* Console.log(`  ${j.name}: last run ${lastRunStr}${lockStr}`);
         }
@@ -134,9 +188,14 @@ const status = Command.make("status", { json: jsonFlag }).pipe(
 
 const VALID_JOBS = new Set<string>(ALL_JOBS);
 
-const run = Command.make("run", { job: jobArg, json: jsonFlag }).pipe(
+const run = Command.make("run", {
+  job: jobArg,
+  json: jsonFlag,
+  executorProvider: executorProviderFlag,
+  sourceProvider: sourceProviderFlag,
+}).pipe(
   Command.withDescription("Run a specific daemon job immediately"),
-  Command.withHandler(({ job, json }) =>
+  Command.withHandler(({ job, json, executorProvider, sourceProvider }) =>
     Effect.gen(function* () {
       if (!VALID_JOBS.has(job)) {
         return yield* new BrainError({
@@ -145,18 +204,29 @@ const run = Command.make("run", { job: jobArg, json: jsonFlag }).pipe(
         });
       }
 
+      const executor = yield* parseProviderOption("executor provider", executorProvider);
+      const source = yield* parseProviderOption("source provider", sourceProvider);
+
       yield* rotateLogs();
 
       const typedJob = job as DaemonJob;
       switch (typedJob) {
         case "reflect":
-          yield* runReflect();
+          yield* runReflect({
+            executorProvider: Option.getOrUndefined(executor),
+            sourceProviders: Option.isSome(source) ? [source.value] : undefined,
+          });
           break;
         case "ruminate":
-          yield* runRuminate();
+          yield* runRuminate({
+            executorProvider: Option.getOrUndefined(executor),
+            sourceProviders: Option.isSome(source) ? [source.value] : undefined,
+          });
           break;
         case "meditate":
-          yield* runMeditate();
+          yield* runMeditate({
+            executorProvider: Option.getOrUndefined(executor),
+          });
           break;
       }
 
@@ -168,15 +238,19 @@ const run = Command.make("run", { job: jobArg, json: jsonFlag }).pipe(
   ),
 );
 
-const tick = Command.make("tick", { json: jsonFlag }).pipe(
+const tick = Command.make("tick", {
+  json: jsonFlag,
+  executorProvider: executorProviderFlag,
+  sourceProvider: sourceProviderFlag,
+}).pipe(
   Command.withDescription("Scheduler tick — dispatches the appropriate job based on current time"),
-  Command.withHandler(({ json }) =>
+  Command.withHandler(({ json, executorProvider, sourceProvider }) =>
     Effect.gen(function* () {
       const now = new Date();
       const input: TickInput = { day: now.getDay(), hour: now.getHours() };
       const job = resolveJob(input);
 
-      if (job === null) {
+      if (Option.isNone(job)) {
         if (json) {
           // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
           yield* Console.log(JSON.stringify({ job: null, status: "skipped" }));
@@ -186,25 +260,36 @@ const tick = Command.make("tick", { json: jsonFlag }).pipe(
         return;
       }
 
-      if (!json) yield* Console.error(`Tick resolved to: ${job}`);
+      const executor = yield* parseProviderOption("executor provider", executorProvider);
+      const source = yield* parseProviderOption("source provider", sourceProvider);
+
+      if (!json) yield* Console.error(`Tick resolved to: ${job.value}`);
 
       yield* rotateLogs();
 
-      switch (job) {
+      switch (job.value) {
         case "reflect":
-          yield* runReflect();
+          yield* runReflect({
+            executorProvider: Option.getOrUndefined(executor),
+            sourceProviders: Option.isSome(source) ? [source.value] : undefined,
+          });
           break;
         case "ruminate":
-          yield* runRuminate();
+          yield* runRuminate({
+            executorProvider: Option.getOrUndefined(executor),
+            sourceProviders: Option.isSome(source) ? [source.value] : undefined,
+          });
           break;
         case "meditate":
-          yield* runMeditate();
+          yield* runMeditate({
+            executorProvider: Option.getOrUndefined(executor),
+          });
           break;
       }
 
       if (json) {
         // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
-        yield* Console.log(JSON.stringify({ job, status: "completed" }));
+        yield* Console.log(JSON.stringify({ job: job.value, status: "completed" }));
       }
     }),
   ),

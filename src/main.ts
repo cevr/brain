@@ -6,6 +6,7 @@ import { command } from "./commands/index.js";
 import { ConfigService } from "./services/Config.js";
 import { VaultService } from "./services/Vault.js";
 import { BuildInfo } from "./services/BuildInfo.js";
+import { AgentPlatformService } from "./services/AgentPlatform.js";
 import { ClaudeService } from "./services/Claude.js";
 
 const APP_ERROR_TAGS = new Set([
@@ -24,14 +25,18 @@ const cli = Command.run(command, {
   version: typeof APP_VERSION !== "undefined" ? APP_VERSION : "0.0.0-dev",
 });
 
-const ServiceLayer = Layer.mergeAll(
-  ConfigService.layer,
-  VaultService.layer,
-  BuildInfo.layer,
-  ClaudeService.layer,
+const CoreLayer = Layer.mergeAll(ConfigService.layer, VaultService.layer, BuildInfo.layer).pipe(
+  Layer.provideMerge(BunServices.layer),
 );
 
-const AppLayer = ServiceLayer.pipe(Layer.provideMerge(BunServices.layer));
+const ServiceLayer = Layer.mergeAll(
+  CoreLayer,
+  ClaudeService.layer,
+  AgentPlatformService.layer.pipe(
+    Layer.provide(ConfigService.layer),
+    Layer.provideMerge(BunServices.layer),
+  ),
+);
 
 const wantsJson = process.argv.includes("--json");
 
@@ -56,4 +61,4 @@ const program = cli.pipe(
 );
 
 // @effect-diagnostics-next-line effect/strictEffectProvide:off
-BunRuntime.runMain(program.pipe(Effect.provide(AppLayer)), { disableErrorReporting: true });
+BunRuntime.runMain(program.pipe(Effect.provide(ServiceLayer)), { disableErrorReporting: true });

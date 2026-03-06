@@ -1,19 +1,30 @@
 import { Command, Flag } from "effect/unstable/cli";
-import { Console, Effect } from "effect";
+import { Console, Effect, Option } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
-import { ConfigService } from "../services/Config.js";
 import { BuildInfo } from "../services/BuildInfo.js";
-import { ConfigError } from "../errors/index.js";
+import {
+  AgentPlatformService,
+  allAgentProviderIds,
+  isAgentProviderId,
+} from "../services/AgentPlatform.js";
+import { BrainError, ConfigError } from "../errors/index.js";
 import { copyDir } from "./init.js";
 
 const jsonFlag = Flag.boolean("json").pipe(Flag.withDescription("Output as JSON"));
+const providerFlag = Flag.string("provider").pipe(
+  Flag.optional,
+  Flag.withDescription("Provider to manage (claude or codex)"),
+);
+const allProvidersFlag = Flag.boolean("all-providers").pipe(
+  Flag.withDescription("Operate on all supported providers"),
+);
 
 interface SkillInfo {
   readonly name: string;
   readonly path: string;
-  readonly symlink: string | null;
+  readonly symlink: Option.Option<string>;
   readonly outdated: boolean;
 }
 
@@ -36,7 +47,7 @@ const resolveSourceDir = Effect.fn("resolveSourceDir")(function* (fs: FileSystem
         }),
     ),
   );
-  return exists ? sourceDir : null;
+  return exists ? Option.some(sourceDir) : Option.none<string>();
 });
 
 const listSkillDirs = Effect.fn("listSkillDirs")(function* (
@@ -135,128 +146,62 @@ const dirsHaveDiff: (
   return false;
 });
 
-const skillsList = Command.make("list", { json: jsonFlag }).pipe(
+const resolveProviders = (
+  platform: AgentPlatformService["Service"],
+  provider: Option.Option<string>,
+  allProviders: boolean,
+) =>
+  Effect.gen(function* () {
+    if (Option.isSome(provider)) {
+      if (!isAgentProviderId(provider.value)) {
+        return yield* new BrainError({
+          message: `Unknown provider "${provider.value}". Valid: ${allAgentProviderIds.join(", ")}`,
+          code: "UNSUPPORTED_PROVIDER",
+        });
+      }
+      return [provider.value] as Array<(typeof allAgentProviderIds)[number]>;
+    }
+
+    if (allProviders) return [...allAgentProviderIds];
+
+    return [yield* platform.resolveInteractiveProvider(Option.none())];
+  });
+
+const skillsList = Command.make("list", {
+  json: jsonFlag,
+  provider: providerFlag,
+  allProviders: allProvidersFlag,
+}).pipe(
   Command.withDescription("List installed skills"),
-  Command.withHandler(({ json }) =>
+  Command.withHandler(({ json, provider, allProviders }) =>
     Effect.gen(function* () {
-      const config = yield* ConfigService;
+      const platform = yield* AgentPlatformService;
       const fs = yield* FileSystem;
       const path = yield* Path;
 
-      const settingsPath = yield* config.claudeSettingsPath();
-      const targetDir = resolveSkillsDir(path, settingsPath);
       const sourceDir = yield* resolveSourceDir(fs, path);
+      const providerIds = yield* resolveProviders(platform, provider, allProviders);
+      const results: Array<{ provider: string; target: string; skills: SkillInfo[] }> = [];
 
-      const targetExists = yield* fs
-        .exists(targetDir)
-        .pipe(Effect.catch(() => Effect.succeed(false)));
-      if (!targetExists) {
-        if (json) {
-          // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
-          yield* Console.log(JSON.stringify({ skills: [], target: targetDir }));
-        } else {
-          yield* Console.error(`No skills directory at ${targetDir}`);
-        }
-        return;
-      }
-
-      const skillNames = yield* listSkillDirs(fs, path, targetDir);
-      const skills: SkillInfo[] = [];
-
-      for (const name of skillNames) {
-        const skillPath = path.join(targetDir, name);
-
-        // Check if symlink
-        const lstat = yield* fs.stat(skillPath).pipe(
-          Effect.mapError(
-            (e: PlatformError) =>
-              new ConfigError({
-                message: `Cannot stat ${name}: ${e.message}`,
-                code: "READ_FAILED",
-              }),
-          ),
-        );
-        let symlink: string | null = null;
-        if (lstat.type === "SymbolicLink") {
-          symlink = yield* fs.readLink(skillPath).pipe(
-            Effect.map((p) => p.toString()),
-            Effect.catch(() => Effect.succeed(skillPath)),
-          );
-        }
-
-        // Check outdated: compare installed vs source
-        let outdated = false;
-        if (sourceDir !== null) {
-          const sourcePath = path.join(sourceDir, name);
-          const sourceExists = yield* fs
-            .exists(sourcePath)
-            .pipe(Effect.catch(() => Effect.succeed(false)));
-          if (sourceExists) {
-            // For symlinks, compare the resolved target vs source
-            const compareTarget = symlink ?? skillPath;
-            outdated = yield* dirsHaveDiff(fs, path, sourcePath, compareTarget);
-          }
-        }
-
-        skills.push({ name, path: skillPath, symlink, outdated });
-      }
-
-      if (json) {
-        // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
-        yield* Console.log(JSON.stringify({ skills, target: targetDir }));
-      } else {
-        for (const skill of skills) {
-          const suffix = skill.symlink !== null ? ` → ${skill.symlink}` : "";
-          const status = skill.outdated ? " (outdated)" : "";
-          yield* Console.log(`${skill.name}${status}${suffix}`);
-        }
-      }
-    }),
-  ),
-);
-
-const skillsSync = Command.make("sync").pipe(
-  Command.withDescription("Sync skills from source to installed location"),
-  Command.withHandler(() =>
-    Effect.gen(function* () {
-      const config = yield* ConfigService;
-      const fs = yield* FileSystem;
-      const path = yield* Path;
-
-      const settingsPath = yield* config.claudeSettingsPath();
-      const targetDir = resolveSkillsDir(path, settingsPath);
-      const sourceDir = yield* resolveSourceDir(fs, path);
-
-      if (sourceDir === null) {
-        yield* Console.error("No skills source found");
-        return;
-      }
-
-      const sourceSkills = yield* listSkillDirs(fs, path, sourceDir);
-
-      yield* fs.makeDirectory(targetDir, { recursive: true }).pipe(
-        Effect.mapError(
-          (e: PlatformError) =>
-            new ConfigError({
-              message: `Cannot create skills dir: ${e.message}`,
-              code: "WRITE_FAILED",
-            }),
-        ),
-      );
-
-      let synced = 0;
-
-      for (const name of sourceSkills) {
-        const sourcePath = path.join(sourceDir, name);
-        const targetPath = path.join(targetDir, name);
-
+      for (const providerId of providerIds) {
+        const agent = yield* platform.getProvider(providerId);
+        const targetDir = resolveSkillsDir(path, agent.integration.settingsPath);
         const targetExists = yield* fs
-          .exists(targetPath)
+          .exists(targetDir)
           .pipe(Effect.catch(() => Effect.succeed(false)));
+        if (!targetExists) {
+          results.push({ provider: providerId, target: targetDir, skills: [] });
+          continue;
+        }
 
-        if (targetExists) {
-          // Check if symlink — don't overwrite symlinks, they're user-managed
-          const lstat = yield* fs.stat(targetPath).pipe(
+        const skillNames = yield* listSkillDirs(fs, path, targetDir);
+        const skills: SkillInfo[] = [];
+
+        for (const name of skillNames) {
+          const skillPath = path.join(targetDir, name);
+
+          // Check if symlink
+          const lstat = yield* fs.stat(skillPath).pipe(
             Effect.mapError(
               (e: PlatformError) =>
                 new ConfigError({
@@ -265,34 +210,132 @@ const skillsSync = Command.make("sync").pipe(
                 }),
             ),
           );
+          let symlink = Option.none<string>();
           if (lstat.type === "SymbolicLink") {
-            // For symlinks, sync to the resolved target
-            const resolvedTarget = yield* fs.readLink(targetPath).pipe(
-              Effect.map((p) => p.toString()),
-              Effect.catch(() => Effect.succeed(targetPath)),
+            symlink = yield* fs.readLink(skillPath).pipe(
+              Effect.map((p) => Option.some(p.toString())),
+              Effect.catch(() => Effect.succeed(Option.some(skillPath))),
             );
+          }
 
-            const hasDiff = yield* dirsHaveDiff(fs, path, sourcePath, resolvedTarget);
-            if (!hasDiff) {
-              continue;
+          let outdated = false;
+          if (Option.isSome(sourceDir)) {
+            const sourcePath = path.join(sourceDir.value, name);
+            const sourceExists = yield* fs
+              .exists(sourcePath)
+              .pipe(Effect.catch(() => Effect.succeed(false)));
+            if (sourceExists) {
+              const compareTarget = Option.getOrElse(symlink, () => skillPath);
+              outdated = yield* dirsHaveDiff(fs, path, sourcePath, compareTarget);
             }
-            yield* copyDir(fs, path, sourcePath, resolvedTarget);
-            synced++;
-            yield* Console.error(`  ${name} → ${resolvedTarget}`);
+          }
+
+          skills.push({ name, path: skillPath, symlink, outdated });
+        }
+
+        results.push({ provider: providerId, target: targetDir, skills });
+      }
+
+      if (json) {
+        // @effect-diagnostics-next-line effect/preferSchemaOverJson:off
+        yield* Console.log(JSON.stringify({ providers: results }));
+      } else {
+        for (const result of results) {
+          yield* Console.log(`${result.provider}: ${result.target}`);
+          for (const skill of result.skills) {
+            const suffix = Option.match(skill.symlink, {
+              onNone: () => "",
+              onSome: (target) => ` → ${target}`,
+            });
+            const status = skill.outdated ? " (outdated)" : "";
+            yield* Console.log(`${skill.name}${status}${suffix}`);
+          }
+        }
+      }
+    }),
+  ),
+);
+
+const skillsSync = Command.make("sync", {
+  provider: providerFlag,
+  allProviders: allProvidersFlag,
+}).pipe(
+  Command.withDescription("Sync skills from source to installed location"),
+  Command.withHandler(({ provider, allProviders }) =>
+    Effect.gen(function* () {
+      const platform = yield* AgentPlatformService;
+      const fs = yield* FileSystem;
+      const path = yield* Path;
+      const sourceDir = yield* resolveSourceDir(fs, path);
+      const providerIds = yield* resolveProviders(platform, provider, allProviders);
+
+      if (Option.isNone(sourceDir)) {
+        yield* Console.error("No skills source found");
+        return;
+      }
+
+      const sourceSkills = yield* listSkillDirs(fs, path, sourceDir.value);
+      let synced = 0;
+
+      for (const providerId of providerIds) {
+        const agent = yield* platform.getProvider(providerId);
+        const targetDir = resolveSkillsDir(path, agent.integration.settingsPath);
+
+        yield* fs.makeDirectory(targetDir, { recursive: true }).pipe(
+          Effect.mapError(
+            (e: PlatformError) =>
+              new ConfigError({
+                message: `Cannot create skills dir: ${e.message}`,
+                code: "WRITE_FAILED",
+              }),
+          ),
+        );
+
+        for (const name of sourceSkills) {
+          const sourcePath = path.join(sourceDir.value, name);
+          const targetPath = path.join(targetDir, name);
+
+          const targetExists = yield* fs
+            .exists(targetPath)
+            .pipe(Effect.catch(() => Effect.succeed(false)));
+
+          if (targetExists) {
+            const lstat = yield* fs.stat(targetPath).pipe(
+              Effect.mapError(
+                (e: PlatformError) =>
+                  new ConfigError({
+                    message: `Cannot stat ${name}: ${e.message}`,
+                    code: "READ_FAILED",
+                  }),
+              ),
+            );
+            if (lstat.type === "SymbolicLink") {
+              const resolvedTarget = yield* fs.readLink(targetPath).pipe(
+                Effect.map((p) => p.toString()),
+                Effect.catch(() => Effect.succeed(targetPath)),
+              );
+
+              const hasDiff = yield* dirsHaveDiff(fs, path, sourcePath, resolvedTarget);
+              if (!hasDiff) {
+                continue;
+              }
+              yield* copyDir(fs, path, sourcePath, resolvedTarget);
+              synced++;
+              yield* Console.error(`  ${providerId}:${name} → ${resolvedTarget}`);
+            } else {
+              const hasDiff = yield* dirsHaveDiff(fs, path, sourcePath, targetPath);
+              if (!hasDiff) {
+                continue;
+              }
+              yield* copyDir(fs, path, sourcePath, targetPath);
+              synced++;
+              yield* Console.error(`  ${providerId}:${name}`);
+            }
           } else {
-            // Regular directory — check diff
-            const hasDiff = yield* dirsHaveDiff(fs, path, sourcePath, targetPath);
-            if (!hasDiff) {
-              continue;
-            }
             yield* copyDir(fs, path, sourcePath, targetPath);
             synced++;
-            yield* Console.error(`  ${name}`);
+            yield* Console.error(`  ${providerId}:${name}`);
           }
-        } else {
-          yield* copyDir(fs, path, sourcePath, targetPath);
-          synced++;
-          yield* Console.error(`  ${name}`);
         }
       }
 
