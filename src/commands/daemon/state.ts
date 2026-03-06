@@ -31,6 +31,8 @@ const EMPTY_STATE: DaemonState = { reflect: {}, ruminate: {}, meditate: {} };
 
 const SETTLE_MS = 30 * 60 * 1000; // 30 minutes
 const STATE_FILE = ".daemon.json";
+const STATE_LOCK_RETRY_DELAY_MS = 50;
+const STATE_LOCK_MAX_ATTEMPTS = 40;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -165,6 +167,43 @@ export const writeState = Effect.fn("writeState")(function* (brainDir: string, s
         }),
     ),
   );
+});
+
+const acquireStateLock = Effect.fn("acquireStateLock")(function* (brainDir: string) {
+  for (let attempt = 0; attempt < STATE_LOCK_MAX_ATTEMPTS; attempt++) {
+    const acquired = yield* acquireLock(brainDir, "state").pipe(
+      Effect.as(true),
+      Effect.catchTag("@cvr/brain/BrainError", (error) => {
+        if (error.code === "LOCKED") return Effect.succeed(false);
+        return Effect.fail(error);
+      }),
+    );
+
+    if (acquired) return;
+
+    if (attempt < STATE_LOCK_MAX_ATTEMPTS - 1) {
+      yield* Effect.sleep(STATE_LOCK_RETRY_DELAY_MS);
+    }
+  }
+
+  return yield* new BrainError({
+    message: `Timed out acquiring daemon state lock after ${String(
+      STATE_LOCK_RETRY_DELAY_MS * STATE_LOCK_MAX_ATTEMPTS,
+    )}ms`,
+    code: "LOCKED",
+  });
+});
+
+export const modifyState = Effect.fn("modifyState")(function* (
+  brainDir: string,
+  update: (state: DaemonState) => DaemonState,
+) {
+  yield* acquireStateLock(brainDir);
+
+  yield* Effect.gen(function* () {
+    const state = yield* readState(brainDir);
+    yield* writeState(brainDir, update(state));
+  }).pipe(Effect.ensuring(releaseLock(brainDir, "state")));
 });
 
 // --- Locking ---

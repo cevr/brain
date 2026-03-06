@@ -11,10 +11,10 @@ import {
   deriveProjectName,
   getProcessedSessions,
   isSettled,
+  modifyState,
   readState,
   releaseLock,
   requireHome,
-  writeState,
   type DaemonState,
 } from "./state.js";
 
@@ -347,30 +347,32 @@ export const runReflect = Effect.fn("runReflect")(function* (opts: RunReflectOpt
         yield* executor.invoke(prompt, "standard", brainDir);
         yield* Console.error(`  Reflected on ${group.sessions.length} session(s)`);
 
-        const processedSessionsByProvider = {
-          ...(state.reflect?.processedSessionsByProvider ?? {}),
-        };
-        const lastSourceScanByProvider = {
-          ...(state.reflect?.lastSourceScanByProvider ?? {}),
-        };
-
-        for (const session of group.sessions) {
-          processedSessionsByProvider[session.provider] = {
-            ...(processedSessionsByProvider[session.provider] ?? {}),
-            [session.sessionKey]: session.mtimeIso,
+        const checkpointedAt = new Date().toISOString();
+        yield* modifyState(brainDir, (latestState) => {
+          const processedSessionsByProvider = {
+            ...(latestState.reflect?.processedSessionsByProvider ?? {}),
           };
-          lastSourceScanByProvider[session.provider] = new Date().toISOString();
-        }
+          const lastSourceScanByProvider = {
+            ...(latestState.reflect?.lastSourceScanByProvider ?? {}),
+          };
 
-        state = {
-          ...state,
-          reflect: {
-            processedSessionsByProvider,
-            lastSourceScanByProvider,
-            lastExecutorRun: new Date().toISOString(),
-          },
-        };
-        yield* writeState(brainDir, state);
+          for (const session of group.sessions) {
+            processedSessionsByProvider[session.provider] = {
+              ...(processedSessionsByProvider[session.provider] ?? {}),
+              [session.sessionKey]: session.mtimeIso,
+            };
+            lastSourceScanByProvider[session.provider] = checkpointedAt;
+          }
+
+          return {
+            ...latestState,
+            reflect: {
+              processedSessionsByProvider,
+              lastSourceScanByProvider,
+              lastExecutorRun: checkpointedAt,
+            },
+          };
+        });
       }).pipe(
         Effect.catch((e) => Console.error(`  Failed to reflect on ${group.projectName}: ${e}`)),
       );

@@ -1,7 +1,7 @@
 import { Console, Effect, Option } from "effect";
 import { AgentPlatformService, type AgentProviderId } from "../../services/AgentPlatform.js";
 import { ConfigService } from "../../services/Config.js";
-import { acquireLock, readState, releaseLock, writeState } from "./state.js";
+import { acquireLock, modifyState, releaseLock } from "./state.js";
 
 interface RunRuminateOptions {
   readonly executorProvider?: AgentProviderId;
@@ -39,11 +39,10 @@ export const runRuminate = Effect.fn("runRuminate")(function* (opts: RunRuminate
     yield* Console.error(`Ruminating with ${executorId}...`);
     yield* executor.invoke(buildRuminatePrompt(brainDir, sourceProviders), "deep", brainDir);
 
-    const state = yield* readState(brainDir);
-    yield* writeState(brainDir, {
+    yield* modifyState(brainDir, (state) => ({
       ...state,
       ruminate: { lastRun: new Date().toISOString() },
-    });
+    }));
 
     yield* Console.error("Ruminate complete");
   }).pipe(Effect.ensuring(releaseLock(brainDir, "ruminate")));

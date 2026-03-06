@@ -1,7 +1,7 @@
 import { Console, Effect, Option } from "effect";
 import { AgentPlatformService, type AgentProviderId } from "../../services/AgentPlatform.js";
 import { ConfigService } from "../../services/Config.js";
-import { acquireLock, readState, releaseLock, writeState } from "./state.js";
+import { acquireLock, modifyState, releaseLock } from "./state.js";
 
 interface RunMeditateOptions {
   readonly executorProvider?: AgentProviderId;
@@ -32,11 +32,10 @@ export const runMeditate = Effect.fn("runMeditate")(function* (opts: RunMeditate
     yield* Console.error(`Meditating with ${executorId}...`);
     yield* executor.invoke(buildMeditatePrompt(brainDir), "deep", brainDir);
 
-    const state = yield* readState(brainDir);
-    yield* writeState(brainDir, {
+    yield* modifyState(brainDir, (state) => ({
       ...state,
       meditate: { lastRun: new Date().toISOString() },
-    });
+    }));
 
     yield* Console.error("Meditate complete");
   }).pipe(Effect.ensuring(releaseLock(brainDir, "meditate")));

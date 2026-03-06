@@ -7,6 +7,7 @@ import { withTempDir } from "../../helpers/index.js";
 import {
   readState,
   writeState,
+  modifyState,
   acquireLock,
   releaseLock,
   lockExists,
@@ -88,6 +89,96 @@ describe("daemon state", () => {
 
           const state = yield* readState(dir);
           expect(state.reflect).toEqual({});
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+  });
+
+  describe("modifyState", () => {
+    it.live("updates state and releases the state lock", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          yield* modifyState(dir, (state) => ({
+            ...state,
+            ruminate: { lastRun: "2024-06-01T00:00:00.000Z" },
+          }));
+
+          const loaded = yield* readState(dir);
+          expect(loaded.ruminate?.lastRun).toBe("2024-06-01T00:00:00.000Z");
+          expect(yield* lockExists(dir, "state")).toBe(false);
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("releases the state lock when the updater throws", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          const exit = yield* modifyState(dir, () => {
+            throw new Error("boom");
+          }).pipe(Effect.exit);
+
+          expect(exit._tag).toBe("Failure");
+          expect(yield* lockExists(dir, "state")).toBe(false);
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("waits for transient state lock contention", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          yield* acquireLock(dir, "state");
+
+          yield* Effect.all(
+            [
+              modifyState(dir, (state) => ({
+                ...state,
+                meditate: { lastRun: "2024-06-01T00:00:00.000Z" },
+              })),
+              Effect.gen(function* () {
+                yield* Effect.sleep(50);
+                yield* releaseLock(dir, "state");
+              }),
+            ],
+            { concurrency: "unbounded" },
+          );
+
+          const loaded = yield* readState(dir);
+          expect(loaded.meditate?.lastRun).toBe("2024-06-01T00:00:00.000Z");
+          expect(yield* lockExists(dir, "state")).toBe(false);
+        }),
+      ).pipe(Effect.provide(TestLayer)),
+    );
+
+    it.live("merges concurrent updates from different branches", () =>
+      withTempDir((dir) =>
+        Effect.gen(function* () {
+          yield* Effect.all(
+            [
+              modifyState(dir, (state) => ({
+                ...state,
+                reflect: {
+                  ...(state.reflect ?? {}),
+                  lastExecutorRun: "2024-06-01T00:00:00.000Z",
+                  processedSessionsByProvider: {
+                    ...(state.reflect?.processedSessionsByProvider ?? {}),
+                    claude: { "proj/session.jsonl": "2024-06-01T00:00:00.000Z" },
+                  },
+                },
+              })),
+              modifyState(dir, (state) => ({
+                ...state,
+                ruminate: { lastRun: "2024-05-01T00:00:00.000Z" },
+              })),
+            ],
+            { concurrency: "unbounded" },
+          );
+
+          const loaded = yield* readState(dir);
+          expect(loaded.reflect?.lastExecutorRun).toBe("2024-06-01T00:00:00.000Z");
+          expect(loaded.reflect?.processedSessionsByProvider?.claude?.["proj/session.jsonl"]).toBe(
+            "2024-06-01T00:00:00.000Z",
+          );
+          expect(loaded.ruminate?.lastRun).toBe("2024-05-01T00:00:00.000Z");
         }),
       ).pipe(Effect.provide(TestLayer)),
     );
