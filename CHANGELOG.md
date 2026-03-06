@@ -1,5 +1,11 @@
 # @cvr/brain
 
+## 0.6.1
+
+### Patch Changes
+
+- [`6293099`](https://github.com/cevr/brain/commit/629309926f96d9909ce276cb315bca29a31acce1) Thanks [@cevr](https://github.com/cevr)! - Serialize daemon state mutations with a dedicated state lock to avoid cross-job checkpoint races.
+
 ## 0.6.0
 
 ### Minor Changes
